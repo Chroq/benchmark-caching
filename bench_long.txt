@@ -1,0 +1,183 @@
+make DURATION=600s WARMUP_DURATION=30s
+make[1] : on entre dans le répertoire « /home/chris/Projets/Personal/knowledges/postgres-for-everything/caching »
+=== Compiling Go Benchmark Server ===
+Build successful: ./bin/server
+========================================================
+ STARTING SEQUENTIAL CACHE BENCHMARK
+ Concurrency: 250 connections | Duration: 600s
+ Server Limits: 4 CPU (GOMAXPROCS) | 4G RAM (GOMEMLIMIT)
+========================================================
+
+========================================================
+ ENGINE: memory 
+========================================================
+Stopping PostgreSQL and Valkey for memory isolation...
+Ensuring port 8080 is clear...
+Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
+Waiting for server (PID 15974) to be ready on port 8080...
+Executing GET benchmark...
+Bombarding http://localhost:8080/memory/get for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec    165526.83   17808.60  222008.51
+  Latency        1.50ms   143.56us    64.97ms
+  Latency Distribution
+     50%     1.20ms
+     75%     2.00ms
+     90%     2.95ms
+     95%     3.70ms
+     99%     6.08ms
+  HTTP codes:
+    1xx - 0, 2xx - 99318607, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:    26.05MB/s
+Executing SET benchmark...
+Bombarding http://localhost:8080/memory/set for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec    120056.83   28821.48  194980.81
+  Latency        2.08ms   159.92us    57.81ms
+  Latency Distribution
+     50%     1.74ms
+     75%     2.88ms
+     90%     4.13ms
+     95%     4.97ms
+     99%     6.93ms
+  HTTP codes:
+    1xx - 0, 2xx - 72025874, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:    26.10MB/s
+Stopping server (PID 15974)...
+Finished memory benchmark.
+
+========================================================
+ ENGINE: valkey 
+========================================================
+Stopping PostgreSQL and starting Valkey...
+Ensuring port 8080 is clear...
+Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
+Waiting for server (PID 17622) to be ready on port 8080...
+Executing GET benchmark...
+Bombarding http://localhost:8080/valkey/get for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec     77079.40    5199.06  114805.03
+  Latency        3.24ms   207.65us    46.55ms
+  Latency Distribution
+     50%     3.08ms
+     75%     4.12ms
+     90%     5.17ms
+     95%     5.86ms
+     99%     7.28ms
+  HTTP codes:
+    1xx - 0, 2xx - 46259780, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:    12.13MB/s
+Executing SET benchmark...
+Bombarding http://localhost:8080/valkey/set for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec     68283.30    6420.34   85601.46
+  Latency        3.66ms   311.15us    55.13ms
+  Latency Distribution
+     50%     3.55ms
+     75%     4.42ms
+     90%     5.33ms
+     95%     5.94ms
+     99%     7.30ms
+  HTTP codes:
+    1xx - 0, 2xx - 40976893, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:    14.85MB/s
+Stopping server (PID 17622)...
+Finished valkey benchmark.
+
+========================================================
+ ENGINE: naive-postgresql 
+========================================================
+Stopping Valkey and starting PostgreSQL...
+Ensuring port 8080 is clear...
+Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
+Waiting for server (PID 19579) to be ready on port 8080...
+Warm-up phase: préchauffage de PostgreSQL (30s)...
+Executing GET benchmark...
+Bombarding http://localhost:8080/postgres/get for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec     32005.04    2869.54   69328.08
+  Latency        7.82ms   408.56us   110.09ms
+  Latency Distribution
+     50%     7.69ms
+     75%     8.63ms
+     90%     9.93ms
+     95%    10.91ms
+     99%    13.09ms
+  HTTP codes:
+    1xx - 0, 2xx - 19181823, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:     5.09MB/s
+Executing SET benchmark...
+Bombarding http://localhost:8080/postgres/set for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec      7176.24    6890.06   22734.95
+  Latency       34.84ms    28.44ms   728.27ms
+  Latency Distribution
+     50%    14.79ms
+     75%    29.40ms
+     90%   105.55ms
+     95%   125.39ms
+     99%   176.27ms
+  HTTP codes:
+    1xx - 0, 2xx - 4305537, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:     1.57MB/s
+Stopping server (PID 19579)...
+Finished naive-postgresql benchmark.
+
+========================================================
+ ENGINE: optimized-postgresql 
+========================================================
+Stopping Valkey and starting PostgreSQL...
+Ensuring port 8080 is clear...
+Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
+Waiting for server (PID 23039) to be ready on port 8080...
+Warm-up phase: préchauffage de PostgreSQL (30s)...
+Executing GET benchmark...
+Bombarding http://localhost:8080/postgres/get for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec     41383.24    3789.44   85553.75
+  Latency        6.04ms   445.94us    78.22ms
+  Latency Distribution
+     50%     5.90ms
+     75%     6.72ms
+     90%     8.13ms
+     95%     9.30ms
+     99%    11.93ms
+  HTTP codes:
+    1xx - 0, 2xx - 24790412, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:     6.58MB/s
+Executing SET benchmark...
+Bombarding http://localhost:8080/postgres/set for 10m0s using 250 connection(s)
+Done!
+Statistics        Avg      Stdev        Max
+  Reqs/sec     37960.17    3257.86   67052.41
+  Latency        6.59ms   596.42us   759.78ms
+  Latency Distribution
+     50%     6.45ms
+     75%     7.34ms
+     90%     8.59ms
+     95%     9.57ms
+     99%    11.74ms
+  HTTP codes:
+    1xx - 0, 2xx - 22755615, 3xx - 0, 4xx - 0, 5xx - 0
+    others - 0
+  Throughput:     8.32MB/s
+Stopping server (PID 23039)...
+Finished optimized-postgresql benchmark.
+========================================================
+ ALL BENCHMARKS COMPLETED SUCCESSFULLY
+========================================================
+make[1] : on quitte le répertoire « /home/chris/Projets/Personal/knowledges/postgres-for-everything/caching »
