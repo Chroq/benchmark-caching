@@ -1,11 +1,11 @@
 -- ============================================================================
--- BENCHMARK CACHE DATABASE SCHEMA & AUTO-MAINTENANCE INFRASTRUCTURE
+-- OPTIMIZED CACHE SCHEMA (OPTIMIZED POSTGRESQL)
 -- ============================================================================
--- Optimized for High-Performance Key-Value Store comparison.
+-- Optimized for High-Performance Key-Value Store caching.
 -- Includes:
--- 1. NAIVE SCHEMA: Flat, standard table (logged), VARCHAR(255) key, JSON bytes value.
--- 2. OPTIMIZED SCHEMA: UNLOGGED partitioned parent table, 16-byte UUID key, Protobuf value.
--- 3. Automated partition management via pg_cron.
+-- 1. UNLOGGED partitioned parent table, 16-byte UUID/ULID key, Protobuf value.
+-- 2. Automated partition management via function (manage_cache_partitions).
+-- 3. Automated partition management via pg_cron (optional).
 -- ============================================================================
 
 -- Enable pg_cron extension if not already present
@@ -13,42 +13,7 @@
 -- CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- ============================================================================
--- PART I: NAIVE CACHE SCHEMA
--- ============================================================================
-CREATE TABLE IF NOT EXISTS cache_naive (
-    key VARCHAR(255) PRIMARY KEY,
-    value BYTEA NOT NULL,
-    expires_at TIMESTAMP NOT NULL
-);
-
--- Disable autovacuum to prevent background I/O interference during benchmarks
-ALTER TABLE cache_naive SET (autovacuum_enabled = false);
-
--- Index to query expired items or support pruning
-CREATE INDEX IF NOT EXISTS idx_cache_naive_expires_at ON cache_naive(expires_at);
-
--- ============================================================================
--- PART I.B: STANDARD RELATIONAL SCHEMA
--- ============================================================================
-CREATE TABLE IF NOT EXISTS users_standard (
-    id UUID PRIMARY KEY,
-    first_name VARCHAR(255) NOT NULL,
-    last_name VARCHAR(255) NOT NULL,
-    birth_date BIGINT NOT NULL,
-    active BOOLEAN NOT NULL,
-    created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL,
-    deleted_at BIGINT NOT NULL,
-    expires_at TIMESTAMP NOT NULL
-);
-
--- Disable autovacuum to prevent background I/O interference during benchmarks
-ALTER TABLE users_standard SET (autovacuum_enabled = false);
-
-CREATE INDEX IF NOT EXISTS idx_users_standard_expires_at ON users_standard(expires_at);
-
--- ============================================================================
--- PART II: OPTIMIZED CACHE SCHEMA
+-- PART I: OPTIMIZED CACHE SCHEMA
 -- ============================================================================
 -- Create Parent Table (standard logged table to support unlogged partitions)
 -- A composite primary key is used because in partitioned tables, the partition key
@@ -61,7 +26,7 @@ CREATE TABLE IF NOT EXISTS cache_optimized_partitioned (
 ) PARTITION BY RANGE (expires_at);
 
 -- ============================================================================
--- PART III: PARTITION MAINTENANCE FUNCTION (manage_cache_partitions)
+-- PART II: PARTITION MAINTENANCE FUNCTION (manage_cache_partitions)
 -- ============================================================================
 -- This function performs two main maintenance tasks:
 -- 1. Preventive Creation: Provisions partition tables for the next 8 hours.
