@@ -25,7 +25,6 @@ type Handler struct {
 	engine      string
 	globalKeys  [][16]byte
 	prngPool    *sync.Pool
-	naiveRepo   ports.NaiveUserRepository
 	optRepo     ports.OptimizedUserRepository
 	stdRepo     ports.StandardUserRepository
 	valkeyRepo  *valkey.Repository
@@ -36,7 +35,6 @@ type Handler struct {
 func NewHandler(
 	engine string,
 	globalKeys [][16]byte,
-	naiveRepo ports.NaiveUserRepository,
 	optRepo ports.OptimizedUserRepository,
 	stdRepo ports.StandardUserRepository,
 	valkeyRepo *valkey.Repository,
@@ -56,7 +54,6 @@ func NewHandler(
 		engine:      engine,
 		globalKeys:  globalKeys,
 		prngPool:    prngPool,
-		naiveRepo:   naiveRepo,
 		optRepo:     optRepo,
 		stdRepo:     stdRepo,
 		valkeyRepo:  valkeyRepo,
@@ -124,9 +121,7 @@ func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
 
 	case "/postgres/get":
 		if string(method) == "GET" {
-			if h.engine == "naive-postgresql" {
-				h.HandlePostgresNaiveGet(ctx)
-			} else if h.engine == "optimized-postgresql" {
+			if h.engine == "optimized-postgresql" {
 				h.HandlePostgresOptimizedGet(ctx)
 			} else if h.engine == "standard-postgresql" {
 				h.HandlePostgresStandardGet(ctx)
@@ -139,9 +134,7 @@ func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
 
 	case "/postgres/set":
 		if string(method) == "POST" {
-			if h.engine == "naive-postgresql" {
-				h.HandlePostgresNaiveSet(ctx)
-			} else if h.engine == "optimized-postgresql" {
+			if h.engine == "optimized-postgresql" {
 				h.HandlePostgresOptimizedSet(ctx)
 			} else if h.engine == "standard-postgresql" {
 				h.HandlePostgresStandardSet(ctx)
@@ -238,48 +231,6 @@ func (h *Handler) HandleValkeySet(ctx *fasthttp.RequestCtx) {
 
 	// Valkey SET with strict 5 minutes TTL
 	if err := h.valkeyRepo.Set(ctx, user, 5*time.Minute); err != nil {
-		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-		return
-	}
-
-	ctx.SetStatusCode(fasthttp.StatusOK)
-}
-
-// ============================================================================
-// 3. POSTGRES NAIVE ENDPOINTS (JSON + VARCHAR key)
-// ============================================================================
-
-func (h *Handler) HandlePostgresNaiveGet(ctx *fasthttp.RequestCtx) {
-	key := h.getRandomKey()
-	keyStr := domain.UUIDToString(key)
-
-	user := userDataPool.Get().(*domain.UserData)
-	defer func() {
-		user.Reset()
-		userDataPool.Put(user)
-	}()
-
-	found, err := h.naiveRepo.Get(ctx, keyStr, user)
-	if err != nil {
-		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-		return
-	}
-
-	if !found {
-		ctx.SetStatusCode(fasthttp.StatusNotFound)
-		return
-	}
-
-	ctx.SetStatusCode(fasthttp.StatusOK)
-}
-
-func (h *Handler) HandlePostgresNaiveSet(ctx *fasthttp.RequestCtx) {
-	key := h.getRandomKey()
-	keyStr := domain.UUIDToString(key)
-	user := generateDummyUser(key)
-
-	// Postgres set with 5 minutes TTL
-	if err := h.naiveRepo.Set(ctx, keyStr, user, 5*time.Minute); err != nil {
 		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
 		return
 	}

@@ -1,151 +1,189 @@
-# Benchmark Caching
+# Benchmark Caching: PostgreSQL vs Valkey vs In-Memory
 
-Ce projet a pour but de comparer de manière objective les performances de **PostgreSQL** (sous deux configurations : Naïve et Optimisée) en tant que cache Key-Value haute performance face à **Valkey** et une implémentation **In-Memory** native.
-
----
-
-## Architecture & Optimisations
-
-1. **In-Memory** : Utilisation d'une structure `sync.Map` globale stockant directement les pointeurs des objets sans surcoût de sérialisation.
-2. **Valkey** : Connexion via un pool de 500 connexions actives. Sérialisation optimisée au format standard Protobuf Wire (écrit manuellement à la main, sans réflexion) et stockage via des clés ULID en chaînes de caractères Crockford Base32.
-3. **Naive PostgreSQL** : 
-   - Table classique SQL (`cache_naive`).
-   - Clé primaire indexée en `VARCHAR(255)`.
-   - Sérialisation au format standard **JSON** via le package `encoding/json` standard de Go.
-4. **Optimized PostgreSQL** :
-   - Table `UNLOGGED` (sans écriture de WAL) partitionnée par tranches de 1 heure (`cache_optimized_partitioned`).
-   - `fillfactor = 70` sur les tables filles pour limiter le coût des HOT (Heap-Only Tuple) updates.
-   - Clé de type `UUID` (16 octets bruts pour stocker l'ULID).
-   - Sérialisation manuelle hautement performante au format **Protobuf** (zéro allocation, zéro réflexion).
-   - Utilisation de **requêtes préparées globales** stockées au niveau de la connexion du pool (`pgxpool.Config.AfterConnect`) pour éliminer tout surcoût de parsing SQL par PostgreSQL lors du bench.
+Ce projet propose une étude comparative la plus rigoureuse possible des performances de **PostgreSQL** utilisé comme cache Key-Value, face à **Valkey** (le fork open-source de Redis) et à une implémentation **In-Memory** native en Go.
 
 ---
 
-## Prérequis
+## 1. Problématique & Objectif
 
-- **Go 1.26+**
-- **Valkey 9.1.0+**
-- **PostgreSQL 18.4+**
+Dans les architectures modernes, l'ajout d'une base Key-Value comme Redis/Valkey est le réflexe standard pour le caching. Cependant, on constate une complexité opérationnelle : nouveaux serveurs à monitorer, synchronisation réseau, coût d'infrastructure et gestion de la cohérence des données.
+
+**L'objectif de ce projet est de répondre à la question suivante :**
+
+> _Est ce que PostgreSQL peut être utilisé comme moteur de cache haute performance ?_
+
+Pour ce faire, nous mesurons le débit (MB/s), le débit transactionnel (requêtes/seconde) et la latence sous forte contention lors d'un test d'endurance de 10 minutes.
 
 ---
 
-## Configuration & Préparation
+## 2. Architecture & Stratégies d'Optimisation
 
-### Limitation des ressources (Contention CPU/RAM)
-Pour garantir l'équité, limitez PostgreSQL et Valkey sur votre machine :
+Le projet implémente et compare 5 configurations de moteurs de cache :
 
-#### PostgreSQL
+### A. In-Memory (Go `sync.Map`)
+
+- **Description :** Stockage en mémoire vive Go via la structure standard `sync.Map`.
+- **Caractéristique :** Zéro réseau, zéro sérialisation (stockage direct de pointeurs d'objets). Représente un indicateur de performance de référence.
+
+### B. Valkey
+
+- **Description :** Cache Key-Value autonome connecté via un pool de 500 connexions actives.
+- **Optimisations :**
+  - Sérialisation manuelle optimisée au format **Protobuf Wire** standard (écriture et lecture directes sur octets, sans utilisation du package de réflexion Go).
+  - Encodage des clés au format ULID chaîné en base32 (Crockford).
+
+### C. Standard PostgreSQL (Flat)
+
+- **Description :** Modèle relationnel classique où chaque champ de l'objet est stocké dans une colonne dédiée (`users_standard`), plutôt que dans un blob JSON/Protobuf.
+- **Optimisations :**
+  - Clé de type binaire native `UUID` (16 octets).
+  - Requêtes préparées au niveau de la connexion pour éviter le parsing SQL à chaque appel.
+  - Depuis la version 18 de PostgreSQL, l'usage du cache a été très largement étendu.
+
+### D. Optimized PostgreSQL
+
+- **Description :** Configuration tirant parti des fonctionnalités avancées de PostgreSQL 18+ pour simuler un comportement de cache transient.
+- **Optimisations implémentées :**
+  1.  **Tables `UNLOGGED` :** Désactivation du journal de transactions (WAL - Write-Ahead Logging). En cas de crash, la table est vidée, ce qui est le comportement attendu d'un cache, éliminant ainsi les goulots d'étranglement d'I/O disque liés aux écritures WAL.
+  2.  **Partitionnement Temporel Automatique :** La table parent `cache_optimized_partitioned` est découpée en partitions physiques de 1 heure. L'invalidation ou l'expiration des clés se fait en supprimant directement une partition entière via une commande `DROP TABLE` (gérée automatiquement), éliminant les opérations `DELETE` massives et le besoin d'exécuter des `VACUUM` coûteux.
+  3.  **Facteur de Remplissage (`fillfactor = 70`) :** Les tables filles réservent 30% d'espace libre par page de base de données. Cela permet aux opérations de mise à jour (`UPDATE`) de s'insérer dans la même page physique (mécanisme _HOT - Heap-Only Tuple_), évitant la réécriture d'index.
+  4.  **Clés Binaires UUID :** Clé primaire indexée sur 16 octets réels (`UUID`), réduisant drastiquement la taille des index comparé au stockage `VARCHAR`.
+  5.  **Sérialisation Protobuf Sans Réflexion :** Les objets Go sont sérialisés manuellement au format Protobuf binaire avec zéro allocation mémoire.
+  6.  **Requêtes Préparées Globales :** Enregistrement des requêtes SQL lors de la connexion initiale (`pgxpool.Config.AfterConnect`) pour contourner la phase de planification de requêtes de Postgres.
+
+---
+
+## 3. Prérequis & Préparation du Système
+
+### Prérequis Logiciels
+
+- **Go** (version 1.26+)
+- **Valkey** (version 9.1.0+) ou Redis
+- **PostgreSQL** (version 18.4+)
+
+### Isolation des Ressources (Contention CPU/RAM)
+
+Pour garantir une comparaison équitable, le serveur Go, PostgreSQL et Valkey doivent être limités en ressources système. Sous Linux, exécutez ces commandes pour configurer des quotas système :
+
 ```bash
+# Limiter PostgreSQL à 2 cœurs CPU et 2 Go de RAM
 sudo systemctl set-property postgresql CPUQuota=200%
 sudo systemctl set-property postgresql MemoryMax=2G
-```
 
-#### Valkey
-```bash
-sudo systemctl set-property valkey-server CPUQuota=200%
+# Limiter Valkey à 1 cœurs CPU (Valkey est monothreadé) et 2 Go de RAM
+sudo systemctl set-property valkey-server CPUQuota=100%
 sudo systemctl set-property valkey-server MemoryMax=2G
 ```
 
-### La saturation des ports TCP de Linux (TIME_WAIT)
+### Optimisation Réseau (TIME_WAIT Exhaustion)
 
-C'est un goulot d'étranglement purement lié à l'OS (Linux) lorsque Bombardier bombarde pendant une longue durée.
-À 60 000 requêtes/seconde pendant 600 secondes, Bombardier va ouvrir et fermer des millions de connexions TCP secondaires. Même avec le protocole Keep-Alive, Linux garde les sockets fermés dans un état appelé TIME_WAIT pendant 60 secondes par sécurité avant de libérer le port local. Vous risquez d'atteindre la limite maximale de ports de votre OS au bout de 3 ou 4 minutes, ce qui provoquera des erreurs de connexion.
+Lors de tests de charge massifs à haute fréquence (60 000+ reqs/sec), l'outil de benchmark (`bombardier`) ouvre et ferme des millions de sockets TCP. Linux garde ces sockets fermés dans un état de sécurité `TIME_WAIT` pendant 60 secondes, saturant rapidement les ports éphémères de l'OS.
 
-Pour éviter ce bruit réseau sur un test long, exécutez ces deux commandes dans votre terminal Linux avant de lancer le benchmark pour forcer l'OS à recycler immédiatement les sockets :
+Pour recycler instantanément ces sockets, configurez les paramètres réseau de votre noyau Linux :
 
 ```bash
-sudo sysctl -w net.ipv4.tcp_tw_reuse=1
-sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"
+make tune-os
+# Ou manuellement :
+# sudo sysctl -w net.ipv4.tcp_tw_reuse=1
+# sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"
 ```
 
 ---
 
-## Initialisation de la Base de Données
+## 4. Initialisation de la Base de Données
 
-Avant de lancer les benchmarks PostgreSQL, initialisez le schéma et les procédures de maintenance automatique :
+Avant de lancer le serveur, vous devez créer le schéma de base de données et charger la fonction de gestion des partitions automatiques dans PostgreSQL.
 
 ```bash
 psql -U postgres -d postgres -f schema.sql
 ```
 
+> [!NOTE]
+> Le fichier `schema.sql` crée automatiquement les partitions pour les 8 prochaines heures et configure une tâche récurrente (si l'extension `pg_cron` est présente) pour créer les futures partitions et supprimer proprement les anciennes.
+
 ---
 
-## Lancement du Serveur de Benchmark
+## 5. Exécution des Benchmarks
 
-Le serveur HTTP s'exécute sur le port `:8080` et charge au démarrage **10 000 entrées fictives** dans le moteur ciblé à l'aide d'un flag d'exécution `-engine`.
+Le serveur HTTP est écrit avec le framework ultra-rapide `fasthttp`. Au démarrage, il pré-charge **10 000 000 de clés fictives** dans le moteur spécifié afin d'avoir un jeu de données représentatif de 10 millions d'entrées.
+
+### Utilisation Rapide via le Makefile
+
+Le projet intègre un Makefile qui gère le cycle de vie complet des tests (compilation, arrêt/démarrage des services pour isolation, préchauffage du cache, exécution des requêtes GET puis SET, et nettoyage).
 
 ```bash
-# Pour tester Valkey (pré-remplissage via Pipeline)
+# Compiler le serveur Go optimisé pour la production
+make build
+
+# Exécuter le benchmark rapide de validation (5 secondes par test)
+make quick
+
+# Exécuter le benchmark intermédiaire (60 secondes par test)
+make medium
+
+# Exécuter le benchmark officiel d'endurance (10 minutes par test)
+make long
+```
+
+### Lancement Manuel du Serveur
+
+Vous pouvez aussi démarrer le serveur individuellement en fonction du moteur choisi :
+
+```bash
+# Tester Valkey
 go run cmd/main.go -engine valkey
 
-# Pour tester PostgreSQL Optimisé (pré-remplissage via Transaction)
+# Tester PostgreSQL Optimisé
 go run cmd/main.go -engine optimized-postgresql
 
-# Pour tester PostgreSQL Naïf
-go run cmd/main.go -engine naive-postgresql
+# Tester PostgreSQL Standard
+go run cmd/main.go -engine standard-postgresql
 
-# Pour tester la sync.Map In-Memory
+# Tester la mémoire vive native Go
 go run cmd/main.go -engine memory
 ```
 
-### Variables d'environnement configurables :
-- `PORT` : Port d'écoute du serveur HTTP (défaut : `8080`).
-- `DATABASE_URL` : URL de connexion PostgreSQL (défaut : `postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable`).
-- `VALKEY_URL` : Adresse de connexion Valkey/Redis (défaut : `localhost:6379`).
+_Endpoints HTTP exposés sur `:8080` :_
+
+- GET : `/memory/get`, `/valkey/get`, `/postgres/get`
+- POST : `/memory/set`, `/valkey/set`, `/postgres/set`
+
+## 6. Résultats Détaillés (Test d'Endurance de 10 Minutes)
+
+Voici les métriques de performance extraites des logs réels d'endurance de **10 minutes** sous une charge constante de **250 connexions simultanées** (WARMUP de 30 secondes préalable pour stabiliser les caches).
+
+### Tableau de Synthèse des Performances
+
+| Configuration              | Opération | Reqs/Sec (Moyen) | Latence (Moyenne) | Latence p50 | Latence p99 | Débit (MB/s) | Erreurs (5xx / Timeouts) |
+| :------------------------- | :-------: | :--------------: | :---------------: | :---------: | :---------: | :----------: | :----------------------: |
+| **In-Memory (`sync.Map`)** |  **GET**  |  **174 386,79**  |      1,43 ms      |   1,17 ms   |   5,42 ms   |  27,44 MB/s  |          0 / 0           |
+|                            |  **SET**  |  **113 974,34**  |      2,19 ms      |   1,81 ms   |   7,88 ms   |  24,78 MB/s  |          0 / 0           |
+| **Valkey**                 |  **GET**  |  **77 915,04**   |      3,21 ms      |   3,04 ms   |   7,21 ms   |  12,26 MB/s  |          0 / 0           |
+|                            |  **SET**  |  **70 096,91**   |      3,56 ms      |   3,45 ms   |   7,26 ms   |  15,24 MB/s  |          0 / 0           |
+| **PostgreSQL Standard**    |  **GET**  |  **39 156,35**   |      6,39 ms      |   6,20 ms   |  12,34 ms   |  6,23 MB/s   |          0 / 0           |
+|                            |  **SET**  |  **11 834,16**   |     21,13 ms      |  13,25 ms   |  128,34 ms  |  2,60 MB/s   |          0 / 0           |
+| **PostgreSQL Optimisé**    |  **GET**  |  **40 115,05**   |      6,23 ms      |   6,03 ms   |  12,51 ms   |  6,38 MB/s   |          0 / 0           |
+|                            |  **SET**  |  **37 764,33**   |      6,62 ms      |   6,49 ms   |  11,74 ms   |  8,28 MB/s   |          0 / 0           |
 
 ---
 
-## Exécution des Benchmarks (Exemple avec bombardier)
+## 7. Analyse Technique & Enseignements
 
-Les handlers ne font aucun log console pour éviter de saturer les entrées/sorties (I/O) de l'hôte et brider le serveur. Chaque requête HTTP pioche de manière non-bloquante (grâce à un pool `sync.Pool` de générateurs `math/rand`) un ID aléatoire parmi les 10 000 générés au démarrage.
+### 1. La métamorphose de PostgreSQL (Standard vs Optimisé)
 
-### 1. In-Memory
-```bash
-# GET requests
-bombardier -c 500 -d 30s http://localhost:8080/memory/get
+- **Lectures (GET) :** Les optimisations maintiennent PostgreSQL à un niveau extrêmement performant et stable de **40 115 reqs/s** avec une latence moyenne de **6,23 ms** (contre **39 156 reqs/s** et **6,39 ms** pour le mode standard).
+- **Écritures (SET) :** C'est le gain le plus spectaculaire. PostgreSQL Optimisé atteint **37 764 reqs/s**, soit **3,2x plus rapide** que le mode Standard (**11 834 reqs/s**), grâce aux tables `UNLOGGED` et au partitionnement temporel qui éliminent l'amplification d'écriture.
 
-# SET requests (POST)
-bombardier -m POST -f payload.json -c 500 -d 30s http://localhost:8080/memory/set
-```
+### 3. Les clés du succès de la configuration Optimisée
 
-### 2. Valkey
-```bash
-# GET requests
-bombardier -c 500 -d 30s http://localhost:8080/valkey/get
+- **L'absence de WAL (`UNLOGGED`) :** En se débarrassant des écritures disques synchrones du WAL, PostgreSQL se comporte comme un vrai moteur In-Memory persistant uniquement sur pages mémoires partagées (_shared buffers_).
+- **Le partitionnement par heure :** Au lieu d'avoir un index gigantesque sur 10 millions de clés qui ralentit au fil des écritures, chaque heure cible une table physique isolée et petite. La purge automatique d'une partition obsolète est instantanée (`DROP TABLE`), évitant tout besoin de nettoyage en arrière-plan.
+- **Protobuf sans allocation :** L'encodage binaire strict réduit la taille du payload stocké dans la colonne `BYTEA` et décharge complètement le processeur Go de la réflexion.
 
-# SET requests (POST)
-bombardier -m POST -f payload.json -c 500 -d 30s http://localhost:8080/valkey/set
-```
+### 4. PostgreSQL face à Valkey (Redis)
 
-### 3. PostgreSQL Naïf
-Avant de lancer le test, démarrez le serveur avec : `go run cmd/main.go -engine naive-postgresql`
-```bash
-# GET requests
-bombardier -c 500 -d 30s http://localhost:8080/postgres/get
+- En lecture (GET), PostgreSQL Optimisé (40.1k reqs/s) offre **51% des performances de Valkey** (77.9k reqs/s).
+- En écriture (SET), PostgreSQL Optimisé (37.7k reqs/s) offre **53% des performances de Valkey** (70.0k reqs/s).
 
-# SET requests (POST)
-bombardier -m POST -f payload.json -c 500 -d 30s http://localhost:8080/postgres/set
-```
-
-### 4. PostgreSQL Optimisé
-Avant de lancer le test, démarrez le serveur avec : `go run cmd/main.go -engine optimized-postgresql`
-```bash
-# GET requests
-bombardier -c 500 -d 30s http://localhost:8080/postgres/get
-
-# SET requests (POST)
-bombardier -m POST -f payload.json -c 500 -d 30s http://localhost:8080/postgres/set
-```
-
----
-
-## 5. Benchmark de Référence Direct (Pilote PostgreSQL de Go)
-
-Si vous souhaitez éliminer toute trace du réseau et du serveur HTTP pour évaluer uniquement la vitesse pure des pilotes et de PostgreSQL (Naïf vs Optimisé), vous pouvez exécuter le benchmark de pilote Go en parallèle :
-
-```bash
-make bench-postgres-direct
-```
-
-Ce benchmark génère en mémoire 1 000 clés et exécute en parallèle les opérations de lecture/écriture directement dans les tables PostgreSQL.
-
+**Conclusion architecturale :**
+Si vos besoins de cache se situent en dessous de 40 000 requêtes/seconde par nœud d'application, et que vous possédez déjà une base PostgreSQL dans votre infrastructure, il est **techniquement viable** d'utiliser PostgreSQL avec cette configuration optimisée (table `UNLOGGED` + partitionnement). Vous éliminez ainsi le coût opérationnel lié au déploiement et à la maintenance d'un cluster Redis/Valkey dédié.

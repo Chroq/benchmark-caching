@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Optimized for High-Performance Key-Value Store comparison.
 -- Includes:
--- 1. NAIVE SCHEMA: Flat, standard table (logged), VARCHAR(255) key, JSON bytes value.
+-- 1. STANDARD SCHEMA: Relational database table direct access.
 -- 2. OPTIMIZED SCHEMA: UNLOGGED partitioned parent table, 16-byte UUID key, Protobuf value.
 -- 3. Automated partition management via pg_cron.
 -- ============================================================================
@@ -11,21 +11,6 @@
 -- Enable pg_cron extension if not already present
 -- Note: 'pg_cron' must also be listed in shared_preload_libraries in postgresql.conf
 -- CREATE EXTENSION IF NOT EXISTS pg_cron;
-
--- ============================================================================
--- PART I: NAIVE CACHE SCHEMA
--- ============================================================================
-CREATE TABLE IF NOT EXISTS cache_naive (
-    key VARCHAR(255) PRIMARY KEY,
-    value BYTEA NOT NULL,
-    expires_at TIMESTAMP NOT NULL
-);
-
--- Disable autovacuum to prevent background I/O interference during benchmarks
-ALTER TABLE cache_naive SET (autovacuum_enabled = false);
-
--- Index to query expired items or support pruning
-CREATE INDEX IF NOT EXISTS idx_cache_naive_expires_at ON cache_naive(expires_at);
 
 -- ============================================================================
 -- PART I.B: STANDARD RELATIONAL SCHEMA

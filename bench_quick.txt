@@ -14,40 +14,42 @@ Build successful: ./bin/server
 Stopping PostgreSQL and Valkey for memory isolation...
 Ensuring port 8080 is clear...
 Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
-Waiting for server (PID 20309) to be ready on port 8080...
+Waiting for server (PID 675933) to be ready on port 8080...
 Executing GET benchmark...
 Bombarding http://localhost:8080/memory/get for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec    213020.09   17766.36  230402.05
-  Latency        1.17ms   636.96us    70.07ms
+  Reqs/sec    133705.83   31930.70  207068.24
+  Latency        1.86ms   782.83us    32.13ms
   Latency Distribution
-     50%     0.97ms
-     75%     1.58ms
-     90%     2.23ms
-     95%     2.67ms
-     99%     4.53ms
+     50%     1.43ms
+     75%     2.53ms
+     90%     3.83ms
+     95%     4.86ms
+     99%     7.54ms
   HTTP codes:
-    1xx - 0, 2xx - 1063700, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 670354, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:    33.46MB/s
+  Throughput:    21.08MB/s
 Executing SET benchmark...
 Bombarding http://localhost:8080/memory/set for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec    191889.72   17233.51  211291.34
-  Latency        1.30ms   667.33us    44.04ms
+  Reqs/sec    117026.04   31698.69  168785.93
+  Latency        2.14ms     1.16ms    39.45ms
   Latency Distribution
-     50%     1.09ms
-     75%     1.78ms
-     90%     2.51ms
-     95%     2.98ms
-     99%     4.37ms
+     50%     1.60ms
+     75%     2.86ms
+     90%     4.39ms
+     95%     5.64ms
+     99%     9.37ms
   HTTP codes:
-    1xx - 0, 2xx - 958777, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 583368, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:    41.68MB/s
-Stopping server (PID 20309)...
+  Throughput:    25.36MB/s
+Stopping server (PID 675933)...
 Finished memory benchmark.
 
 ========================================================
@@ -56,84 +58,88 @@ Finished memory benchmark.
 Stopping PostgreSQL and starting Valkey...
 Ensuring port 8080 is clear...
 Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
-Waiting for server (PID 20558) to be ready on port 8080...
+Waiting for server (PID 676124) to be ready on port 8080...
 Executing GET benchmark...
 Bombarding http://localhost:8080/valkey/get for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec    101079.47    9856.63  114268.33
-  Latency        2.47ms     0.87ms    50.24ms
+  Reqs/sec     52225.81   15720.53   96913.48
+  Latency        4.79ms     1.97ms    49.29ms
   Latency Distribution
-     50%     2.33ms
-     75%     3.13ms
-     90%     3.95ms
-     95%     4.48ms
-     99%     5.59ms
+     50%     4.20ms
+     75%     6.01ms
+     90%     8.26ms
+     95%    10.13ms
+     99%    15.13ms
   HTTP codes:
-    1xx - 0, 2xx - 505515, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 261086, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:    15.91MB/s
+  Throughput:     8.21MB/s
 Executing SET benchmark...
 Bombarding http://localhost:8080/valkey/set for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec     92942.93    7166.81  107480.09
-  Latency        2.69ms   462.91us    25.40ms
+  Reqs/sec     46200.06   10062.09   68696.95
+  Latency        5.41ms     1.98ms    50.76ms
   Latency Distribution
-     50%     2.59ms
-     75%     3.27ms
-     90%     4.01ms
-     95%     4.52ms
-     99%     5.71ms
+     50%     4.85ms
+     75%     6.75ms
+     90%     9.02ms
+     95%    10.70ms
+     99%    15.77ms
   HTTP codes:
-    1xx - 0, 2xx - 464729, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 230772, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:    20.20MB/s
-Stopping server (PID 20558)...
+  Throughput:    10.03MB/s
+Stopping server (PID 676124)...
 Finished valkey benchmark.
 
 ========================================================
- ENGINE: naive-postgresql 
+ ENGINE: standard-postgresql 
 ========================================================
 Stopping Valkey and starting PostgreSQL...
 Ensuring port 8080 is clear...
 Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
-Waiting for server (PID 20925) to be ready on port 8080...
+Waiting for server (PID 676718) to be ready on port 8080...
 Warm-up phase: préchauffage de PostgreSQL (2s)...
 Executing GET benchmark...
 Bombarding http://localhost:8080/postgres/get for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec     10651.87    4378.46   20293.34
-  Latency       23.50ms     9.88ms   109.50ms
+  Reqs/sec     20264.27    4387.82   30807.23
+  Latency       12.36ms     3.00ms    63.92ms
   Latency Distribution
-     50%    20.67ms
-     75%    28.03ms
-     90%    35.97ms
-     95%    44.22ms
-     99%    64.34ms
+     50%    11.83ms
+     75%    13.87ms
+     90%    16.32ms
+     95%    18.42ms
+     99%    26.22ms
   HTTP codes:
-    1xx - 0, 2xx - 53252, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 101146, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:     1.68MB/s
+  Throughput:     3.22MB/s
 Executing SET benchmark...
 Bombarding http://localhost:8080/postgres/set for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec      4275.43    3534.10   13222.27
-  Latency       58.38ms    84.40ms   761.19ms
+  Reqs/sec      9517.09    3763.54   17045.89
+  Latency       26.25ms    14.07ms   195.98ms
   Latency Distribution
-     50%    30.14ms
-     75%    71.06ms
-     90%    93.50ms
-     95%   113.81ms
-     99%   586.16ms
+     50%    22.56ms
+     75%    29.21ms
+     90%    39.23ms
+     95%    46.76ms
+     99%    65.08ms
   HTTP codes:
-    1xx - 0, 2xx - 21559, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 47729, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:     0.93MB/s
-Stopping server (PID 20925)...
-Finished naive-postgresql benchmark.
+  Throughput:     2.08MB/s
+Stopping server (PID 676718)...
+Finished standard-postgresql benchmark.
 
 ========================================================
  ENGINE: optimized-postgresql 
@@ -141,41 +147,43 @@ Finished naive-postgresql benchmark.
 Stopping Valkey and starting PostgreSQL...
 Ensuring port 8080 is clear...
 Starting server with GOMAXPROCS=4 and GOMEMLIMIT=4GiB...
-Waiting for server (PID 21858) to be ready on port 8080...
+Waiting for server (PID 676985) to be ready on port 8080...
 Warm-up phase: préchauffage de PostgreSQL (2s)...
 Executing GET benchmark...
 Bombarding http://localhost:8080/postgres/get for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec     22680.92   10189.98   42168.87
-  Latency       11.01ms     5.53ms    63.37ms
+  Reqs/sec     25281.67    5498.28   39667.56
+  Latency        9.87ms     2.35ms    38.54ms
   Latency Distribution
-     50%     8.69ms
-     75%    11.39ms
-     90%    20.76ms
-     95%    25.80ms
-     99%    37.02ms
+     50%     9.37ms
+     75%    11.33ms
+     90%    13.78ms
+     95%    15.98ms
+     99%    21.31ms
   HTTP codes:
-    1xx - 0, 2xx - 113500, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 126598, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:     3.61MB/s
+  Throughput:     4.03MB/s
 Executing SET benchmark...
 Bombarding http://localhost:8080/postgres/set for 5s using 250 connection(s)
-Done!
+
+
 Statistics        Avg      Stdev        Max
-  Reqs/sec     39350.38    6251.25   55911.81
-  Latency        6.34ms     1.33ms    34.71ms
+  Reqs/sec     28215.89    6499.14   42434.40
+  Latency        8.83ms     2.69ms    51.88ms
   Latency Distribution
-     50%     6.03ms
-     75%     7.44ms
-     90%     9.01ms
-     95%    10.16ms
-     99%    13.04ms
+     50%     8.29ms
+     75%    10.19ms
+     90%    12.64ms
+     95%    14.55ms
+     99%    20.88ms
   HTTP codes:
-    1xx - 0, 2xx - 197194, 3xx - 0, 4xx - 0, 5xx - 0
+    1xx - 0, 2xx - 141545, 3xx - 0, 4xx - 0, 5xx - 0
     others - 0
-  Throughput:     8.64MB/s
-Stopping server (PID 21858)...
+  Throughput:     6.20MB/s
+Stopping server (PID 676985)...
 Finished optimized-postgresql benchmark.
 ========================================================
  ALL BENCHMARKS COMPLETED SUCCESSFULLY

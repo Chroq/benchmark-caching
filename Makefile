@@ -24,7 +24,7 @@ export DATABASE_URL
 export VALKEY_URL
 export LOG_LEVEL
 
-.PHONY: all build clean run-all quick bench-memory bench-valkey bench-naive-postgres bench-opt-postgres tune-os
+.PHONY: all build clean run-all quick medium long bench-memory bench-valkey bench-standard-postgres bench-opt-postgres tune-os
 
 # Run the complete test suite sequentially
 all: build run-all
@@ -70,7 +70,7 @@ run-all:
 	@echo "========================================================"
 	@$(call run_bench,memory,memory)
 	@$(call run_bench,valkey,valkey)
-	@$(call run_bench,naive-postgresql,postgres)
+	@$(call run_bench,standard-postgresql,postgres)
 	@$(call run_bench,optimized-postgresql,postgres)
 	@echo "========================================================"
 	@echo " ALL BENCHMARKS COMPLETED SUCCESSFULLY"
@@ -82,9 +82,6 @@ bench-memory: build
 
 bench-valkey: build
 	@$(call run_bench,valkey,valkey)
-
-bench-naive-postgres: build
-	@$(call run_bench,naive-postgresql,postgres)
 
 bench-opt-postgres: build
 	@$(call run_bench,optimized-postgresql,postgres)
@@ -122,6 +119,7 @@ define run_bench
 	echo "========================================================"
 	echo " ENGINE: $(1) "
 	echo "========================================================"
+	@$(MAKE) tune-os
 	$(call manage_services,$(1))
 	echo "Ensuring port $(PORT) is clear..." ; \
 	pids=$$(lsof -t -i:$(PORT) 2>/dev/null) ; if [ -n "$$pids" ]; then kill -9 $$pids 2>/dev/null || true ; fi ; \
@@ -139,7 +137,7 @@ define run_bench
 		kill $$pid 2>/dev/null || true ; \
 		exit 1 ; \
 	fi ; \
-	if [ "$(1)" = "naive-postgresql" ] || [ "$(1)" = "optimized-postgresql" ] || [ "$(1)" = "standard-postgresql" ]; then \
+	if [ "$(1)" = "optimized-postgresql" ] || [ "$(1)" = "standard-postgresql" ]; then \
 		echo "Warm-up phase: préchauffage de PostgreSQL ($(WARMUP_DURATION))..." ; \
 		bombardier -q -c $(CONNECTIONS) -d $(WARMUP_DURATION) http://localhost:$(PORT)/$(2)/get ; \
 	fi ; \

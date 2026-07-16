@@ -29,7 +29,7 @@ func main() {
 	domain.BootstrapTime = time.Now().UTC()
 
 	// 1. Define command line flags
-	engine := flag.String("engine", "optimized-postgresql", "Storage engine to benchmark (memory, valkey, naive-postgresql, optimized-postgresql, standard-postgresql)")
+	engine := flag.String("engine", "optimized-postgresql", "Storage engine to benchmark (memory, valkey, optimized-postgresql, standard-postgresql)")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error, production)")
 	flag.Parse()
 
@@ -93,7 +93,6 @@ func main() {
 		}
 	}
 
-	var naiveRepo ports.NaiveUserRepository
 	var optRepo ports.OptimizedUserRepository
 	var stdRepo ports.StandardUserRepository
 	var valkeyRepo *valkeyAdapter.Repository
@@ -160,7 +159,7 @@ func main() {
 			cancel()
 		}
 
-	case "naive-postgresql", "optimized-postgresql", "standard-postgresql":
+	case "optimized-postgresql", "standard-postgresql":
 		slog.Info("Connecting to PostgreSQL to run migrations...")
 		var migConn *pgx.Conn
 		var err error
@@ -214,24 +213,12 @@ func main() {
 		config.MaxConnLifetime = 5 * time.Minute
 
 		config.AfterConnect = func(connectCtx context.Context, conn *pgx.Conn) error {
-			// Prepare Naive Statements
-			_, errNaiveGet := conn.Prepare(connectCtx, "get_user_naive",
-				"SELECT value FROM cache_naive WHERE key = $1 AND expires_at > $2")
-			_, errNaiveSet := conn.Prepare(connectCtx, "set_user_naive",
-				"INSERT INTO cache_naive (key, value, expires_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at")
-
 			// Prepare Standard Statements
 			_, errStdGet := conn.Prepare(connectCtx, "get_user_standard",
 				"SELECT id, first_name, last_name, birth_date, active, created_at, updated_at, deleted_at FROM users_standard WHERE id = $1 AND expires_at > $2")
 			_, errStdSet := conn.Prepare(connectCtx, "set_user_standard",
 				"INSERT INTO users_standard (id, first_name, last_name, birth_date, active, created_at, updated_at, deleted_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO UPDATE SET first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, birth_date = EXCLUDED.birth_date, active = EXCLUDED.active, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at, expires_at = EXCLUDED.expires_at")
 
-			if errNaiveGet != nil {
-				return errNaiveGet
-			}
-			if errNaiveSet != nil {
-				return errNaiveSet
-			}
 			if errStdGet != nil {
 				return errStdGet
 			}
@@ -255,51 +242,7 @@ func main() {
 			os.Exit(1)
 		}
 		cancel()
-
 		switch *engine {
-		case "naive-postgresql":
-			naiveRepo = dbAdapter.NewNaiveRepository(pool)
-			var exists bool
-			err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM cache_naive)").Scan(&exists)
-			if err == nil && exists {
-				// Check if there are any expired keys
-				var hasExpired bool
-				errExists := pool.QueryRow(ctx, 
-					"SELECT EXISTS(SELECT 1 FROM cache_naive WHERE expires_at <= $1)",
-					time.Now().UTC(),
-				).Scan(&hasExpired)
-
-				if errExists == nil && !hasExpired {
-					slog.Info("PostgreSQL cache_naive table already populated and valid. Skipping seeding.")
-					slog.Info("Analyzing cache_naive table...")
-					_, _ = pool.Exec(ctx, "ANALYZE cache_naive")
-				} else {
-					slog.Info("PostgreSQL cache_naive table has expired keys. Extending TTL of expired keys...")
-					_, errExt := pool.Exec(ctx, 
-						"UPDATE cache_naive SET expires_at = $1 WHERE expires_at <= $2",
-						time.Now().UTC().Add(100*time.Hour),
-						time.Now().UTC(),
-					)
-					if errExt != nil {
-						slog.Error("Failed to extend naive TTL", "error", errExt)
-					}
-					slog.Info("Analyzing cache_naive table...")
-					_, _ = pool.Exec(ctx, "ANALYZE cache_naive")
-				}
-			} else {
-				slog.Info("PostgreSQL cache_naive count mismatch or missing. Truncating table...", "expected", nbKey)
-				_, _ = pool.Exec(ctx, "TRUNCATE TABLE cache_naive")
-				slog.Info("Seeding records into cache_naive...")
-				seedCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				if err := naiveRepo.Seed(seedCtx, dummyUsers, 100*time.Hour); err != nil {
-					cancel()
-					slog.Error("PostgreSQL naive seeding failed", "error", err)
-					os.Exit(1)
-				}
-				cancel()
-				slog.Info("Analyzing cache_naive table...")
-				_, _ = pool.Exec(ctx, "ANALYZE cache_naive")
-			}
 		case "standard-postgresql":
 			stdRepo = dbAdapter.NewStandardRepository(pool)
 			var exists bool
@@ -307,7 +250,7 @@ func main() {
 			if err == nil && exists {
 				// Check if there are any expired keys
 				var hasExpired bool
-				errExists := pool.QueryRow(ctx, 
+				errExists := pool.QueryRow(ctx,
 					"SELECT EXISTS(SELECT 1 FROM users_standard WHERE expires_at <= $1)",
 					time.Now().UTC(),
 				).Scan(&hasExpired)
@@ -318,7 +261,7 @@ func main() {
 					_, _ = pool.Exec(ctx, "ANALYZE users_standard")
 				} else {
 					slog.Info("PostgreSQL users_standard table has expired keys. Extending TTL of expired keys...")
-					_, errExt := pool.Exec(ctx, 
+					_, errExt := pool.Exec(ctx,
 						"UPDATE users_standard SET expires_at = $1 WHERE expires_at <= $2",
 						time.Now().UTC().Add(100*time.Hour),
 						time.Now().UTC(),
@@ -345,22 +288,22 @@ func main() {
 			}
 		case "optimized-postgresql":
 			optRepo = dbAdapter.NewOptimizedRepository(pool)
-			
+
 			// For optimized partitioned table, target time is BootstrapTime + 2 hours
 			targetTime := domain.BootstrapTime.Add(2 * time.Hour)
 			partitionName := "cache_opt_partition_" + targetTime.Format("2006_01_02_15")
-			
+
 			var count int64
 			var tableExists bool
-			errExists := pool.QueryRow(ctx, 
-				"SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = $1)", 
+			errExists := pool.QueryRow(ctx,
+				"SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = $1)",
 				partitionName,
 			).Scan(&tableExists)
-			
+
 			if errExists == nil && tableExists {
 				err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+partitionName).Scan(&count)
 			}
-			
+
 			if errExists == nil && tableExists && err == nil && count == int64(nbKey) {
 				slog.Info("PostgreSQL partition table already fully populated. Skipping seeding.", "partition", partitionName, "count", count)
 				slog.Info("Analyzing cache_optimized_partitioned table...")
@@ -369,7 +312,7 @@ func main() {
 				slog.Info("PostgreSQL partition table is not populated or has mismatch. Truncating parent and seeding...", "partition", partitionName)
 				// Truncate the entire parent table to clear old partitions instantly
 				_, _ = pool.Exec(ctx, "TRUNCATE TABLE cache_optimized_partitioned")
-				
+
 				slog.Info("Seeding records into cache_optimized_partitioned...")
 				seedCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 				if err := optRepo.Seed(seedCtx, dummyUsers, 2*time.Hour); err != nil {
@@ -389,7 +332,7 @@ func main() {
 	}
 
 	// 6. Setup HTTP Server and use the ultra-fast direct switch router
-	handler := httpAdapter.NewHandler(*engine, globalKeys, naiveRepo, optRepo, stdRepo, valkeyRepo, memoryStore)
+	handler := httpAdapter.NewHandler(*engine, globalKeys, optRepo, stdRepo, valkeyRepo, memoryStore)
 
 	server := &fasthttp.Server{
 		Handler:      handler.Handle,

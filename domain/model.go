@@ -625,13 +625,13 @@ func ParseULID(s string) ([16]byte, error) {
 	u[3] = (dec[5] << 4) | (dec[6] >> 1)
 	u[4] = (dec[6] << 7) | (dec[7] << 2) | (dec[8] >> 3)
 	u[5] = (dec[8] << 5) | dec[9]
-	
+
 	u[6] = (dec[10] << 3) | (dec[11] >> 2)
 	u[7] = (dec[11] << 6) | (dec[12] << 1) | (dec[13] >> 4)
 	u[8] = (dec[13] << 4) | (dec[14] >> 1)
 	u[9] = (dec[14] << 7) | (dec[15] << 2) | (dec[16] >> 3)
 	u[10] = (dec[16] << 5) | dec[17]
-	
+
 	u[11] = (dec[18] << 3) | (dec[19] >> 2)
 	u[12] = (dec[19] << 6) | (dec[20] << 1) | (dec[21] >> 4)
 	u[13] = (dec[21] << 4) | (dec[22] >> 1)
@@ -823,4 +823,3 @@ func (u *UserData) Reset() {
 	u.UpdatedAt = 0
 	u.DeletedAt = 0
 }
-
