@@ -14,7 +14,6 @@ type UserData struct {
 	DeletedAt int64  // Unix Timestamp
 }
 
-// Reset clears all fields of UserData to support sync.Pool recycling.
 func (u *UserData) Reset() {
 	u.ID = [16]byte{}
 	u.FirstName = ""

@@ -5,8 +5,10 @@ go 1.26.3
 require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/maypok86/otter/v2 v2.3.0
+	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/redis/go-redis/v9 v9.19.0
 	github.com/valyala/fasthttp v1.71.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (

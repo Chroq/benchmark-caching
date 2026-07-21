@@ -44,7 +44,7 @@ func (r *OptimizedRepository) Get(ctx context.Context, id [16]byte, dest *model.
 	var value []byte
 
 	err := r.pool.QueryRow(ctx,
-		"SELECT value FROM cache_optimized WHERE key = $1",
+		"SELECT value FROM cache_optimized WHERE key = $1 AND expires_at > NOW()::timestamp",
 		id,
 	).Scan(&value)
 

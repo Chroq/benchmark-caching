@@ -61,6 +61,13 @@ gen-targets:
 	@mkdir -p gen
 	@go run ./cmd/gentargets -count=100000 -keys-file=gen/keys.txt
 
+# Generate Protobuf Go & VTProto code
+proto-gen:
+	@echo "=== Generating Protobuf VTProto Code ==="
+	@export PATH=$$PATH:$$(go env GOPATH)/bin && protoc --proto_path=. --go_out=. --go_opt=paths=source_relative --go-vtproto_out=. --go-vtproto_opt=paths=source_relative,features=marshal+unmarshal+size internal/infrastructure/serializer/pb/user.proto
+	@echo "Protobuf VTProto generation complete."
+
+
 # Macro to run benchmark suites: outputs to stdout by default, or cleans output into TARGET_OUT if specified
 define run_suite
     if [ -n "$(TARGET_OUT)" ]; then \

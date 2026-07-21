@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"runtime"
 
 	"github.com/Chroq/benchmark-caching/internal/config"
 	"github.com/Chroq/benchmark-caching/internal/domain/port/input"
@@ -20,8 +19,6 @@ import (
 // SetupUseCase initializes storage engine dependencies, injects them into the repository,
 // wires the domain UserUseCase service, and returns a cleanup closure for graceful shutdown.
 func SetupUseCase(ctx context.Context, cfg *config.Config, globalKeys [][16]byte) (input.UserUseCase, func(), error) {
-	runtime.GC()
-
 	var repo output.UserRepository
 
 	switch cfg.Engine {

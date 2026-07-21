@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -45,6 +46,7 @@ func main() {
 
 	// 3. Generate ULID keys dataset
 	globalKeys := seeder.GenerateKeys(nbKey)
+	runtime.GC()
 
 	// 4. Setup storage engine repository & instantiate domain UserUseCase service
 	ctx := context.Background()
