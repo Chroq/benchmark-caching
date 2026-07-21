@@ -1,84 +1,125 @@
-# Benchmark Caching: PostgreSQL vs Valkey vs In-Memory
+# PostgreSQL as a High-Performance Cache: Comparative Benchmark
 
-Ce projet propose une étude comparative la plus rigoureuse possible des performances de **PostgreSQL** utilisé comme cache Key-Value, face à **Valkey** (le fork open-source de Redis) et à une implémentation **In-Memory** native en Go.
-
----
-
-## 1. Problématique & Objectif
-
-Dans les architectures modernes, l'ajout d'une base Key-Value comme Redis/Valkey est le réflexe standard pour le caching. Cependant, on constate une complexité opérationnelle : nouveaux serveurs à monitorer, synchronisation réseau, coût d'infrastructure et gestion de la cohérence des données.
-
-**L'objectif de ce projet est de répondre à la question suivante :**
-
-> _Est ce que PostgreSQL peut être utilisé comme moteur de cache haute performance ?_
-
-Pour ce faire, nous mesurons le débit (MB/s), le débit transactionnel (requêtes/seconde) et la latence sous forte contention lors d'un test d'endurance de 10 minutes.
+A technical, production-grade benchmarking suite evaluating **PostgreSQL** as a high-throughput, low-latency Key-Value cache against **Valkey** (Redis open-source fork) and an in-memory Go cache engine (**Otter**).
 
 ---
 
-## 2. Architecture & Stratégies d'Optimisation
+## 💡 Overview & Objective
 
-Le projet implémente et compare 4 configurations de moteurs de cache :
+In modern cloud architectures, introducing a dedicated key-value store (such as Redis or Valkey) is the standard pattern for application caching. While effective, this approach introduces operational complexity: managing additional cluster nodes, handling cross-network latency, maintaining data synchronization, and managing additional infrastructure costs.
 
-### A. In-Memory (Otter Cache)
+This project empirically investigates a critical architectural question:
 
-- **Description :** Stockage en mémoire vive Go via le moteur d'in-memory caching `Otter` (supportant la gestion dynamique du TTL).
-- **Caractéristique :** Zéro réseau, zéro sérialisation (stockage direct de pointeurs d'objets). Représente un indicateur de performance de référence.
+> **Can a properly tuned PostgreSQL instance serve as an enterprise-grade, high-throughput key-value cache while preserving data locality and simplifying infrastructure?**
 
-### B. Valkey
-
-- **Description :** Cache Key-Value autonome connecté via un pool de 500 connexions actives.
-- **Optimisations :**
-  - Sérialisation manuelle optimisée au format **Protobuf Wire** standard (écriture et lecture directes sur octets, sans utilisation du package de réflexion Go).
-  - Encodage des clés au format ULID chaîné en base32 (Crockford).
-
-### C. Standard PostgreSQL (Flat)
-
-- **Description :** Modèle relationnel classique où chaque champ de l'objet est stocké dans une colonne dédiée (`users_standard`), plutôt que dans un blob JSON/Protobuf.
-- **Optimisations :**
-  - Clé de type binaire native `UUID` (16 octets).
-  - Requêtes préparées au niveau de la connexion pour éviter le parsing SQL à chaque appel.
-
-### D. Optimized PostgreSQL
-
-- **Description :** Configuration tirant parti des fonctionnalités avancées de PostgreSQL pour simuler un comportement de cache transitoire ultra-performant.
-- **Optimisations implémentées :**
-  1.  **Table `UNLOGGED` :** Désactivation du journal de transactions (WAL - Write-Ahead Logging). Élimine les goulots d'étranglement d'I/O disque liés aux écritures WAL (vitesse proche du in-memory).
-  2.  **Purge Asynchrone Non-Bloquante par Lots :** Invalidation via une fonction PL/pgSQL (`purge_expired_cache_keys`) exécutée régulièrement par `pg_cron` qui supprime les clés expirées par lots (`DELETE` par tranches de 10 000 avec `FOR UPDATE SKIP LOCKED`), préservant la fluidité des lectures (`GET`).
-  3.  **Facteur de Remplissage (`fillfactor = 70`) :** La table réserve 30% d'espace libre par page physique pour favoriser les mises à jour en place (mécanisme _HOT_ - Heap-Only Tuple) sans réécrire les index.
-  4.  **Clés Binaires UUID/ULID :** Clé primaire `key UUID` indexée directement sur 16 octets réels pour des recherches B-Tree instantanées (< 1ms).
-  5.  **Sérialisation Protobuf Sans Réflexion :** Les objets Go sont sérialisés au format Protobuf binaire avec zéro allocation mémoire.
+To answer this, we measure throughput (MB/s), request execution rates (RPS), and latency distribution under sustained concurrency across four distinct caching paradigms over an endurance testing protocol.
 
 ---
 
-## 3. Prérequis & Préparation du Système
+## 🏗️ Architecture & Evaluated Engines
 
-### Prérequis Logiciels
+The benchmark runner executes an ultra-low-allocation HTTP service written in Go (`fasthttp`), exposing standardized GET/SET endpoints across four storage backends:
 
-- **Go** (version 1.26+)
-- **Valkey** (version 9.1.0+) ou Redis
-- **PostgreSQL** (version 18.4+)
-- **Vegeta** (outil d'invalidation/charge HTTP, installable via `go install github.com/tsenart/vegeta/v12@latest`)
-
-### Isolation des Ressources (Contention CPU/RAM)
-
-Pour garantir une comparaison équitable, le serveur Go, PostgreSQL et Valkey doivent être limités en ressources système sous Linux :
-
-```bash
-# Limiter PostgreSQL à 2 cœurs CPU et 4 Go de RAM
-sudo systemctl set-property postgresql CPUQuota=200%
-sudo systemctl set-property postgresql MemoryMax=4G
-
-# Limiter Valkey à 1 cœur CPU et 4 Go de RAM
-sudo systemctl set-property valkey-server CPUQuota=100%
-sudo systemctl set-property valkey-server MemoryMax=4G
+```
+                      +----------------------------------+
+                      |       Vegeta Load Generator      |
+                      +----------------------------------+
+                                       |
+                                       v
+                      +----------------------------------+
+                      |   Go fasthttp Engine (Port 8080) |
+                      |    (Zero-Alloc Buffer Recycling) |
+                      +----------------------------------+
+                                       |
+     +-------------------+-------------+-------------+-------------------+
+     |                   |                           |                   |
+     v                   v                           v                   v
++----------+   +-------------------+   +--------------------+   +--------------------+
+|  Otter   |   |   Valkey 9.1      |   | Standard Postgres  |   | Optimized Postgres |
+| (Memory) |   | (Protobuf VTProto)|   | (Relational / UUID)|   | (UNLOGGED / VTProto|
++----------+   +-------------------+   +--------------------+   +--------------------+
 ```
 
-### Optimisation Réseau (TIME_WAIT Exhaustion)
+### Evaluated Configurations
 
-Lors de tests de charge massifs, l'outil de benchmark (`vegeta`) ouvre et ferme des millions de sockets TCP.
+1. **In-Memory (`Otter`)**
+   - **Mechanism:** Native Go in-memory cache leveraging `github.com/maypok86/otter/v2` with automated lock-free TTL expiration.
+   - **Role:** Serves as the theoretical performance ceiling (zero network, zero serialization overhead).
 
-Pour recycler instantanément ces sockets, configurez les paramètres réseau de votre noyau Linux :
+2. **Valkey Key-Value Store**
+   - **Mechanism:** Valkey 9.1 standalone instance connected via a tuned TCP connection pool (2,500 connections).
+   - **Payload Format:** Protobuf binary wire format compiled via `planetscale/vtprotobuf` (`MarshalVT` / `UnmarshalVT`).
+   - **Indexing:** 26-character Base32 Crockford ULIDs backed by `github.com/oklog/ulid/v2`.
+
+3. **Standard PostgreSQL (`Relational / Flat`)**
+   - **Mechanism:** Standard relational table (`users_standard`) with individual columns per field.
+   - **Queries:** Prepared statements executed at the connection layer (`pgxpool`) to eliminate SQL parsing overhead.
+   - **Indexing:** Binary UUID primary key (`UUID` / 16 bytes).
+
+4. **Optimized PostgreSQL (`UNLOGGED / Protobuf VTProto`)**
+   - **Mechanism:** Dedicated key-value cache architecture leveraging advanced PostgreSQL internals designed for transient workloads.
+   - **Payload Format:** Protobuf VTProto zero-allocation byte payload stored in a bytea column.
+
+---
+
+## ⚡ Technical Core & System Optimizations
+
+### 1. Protobuf VTProto (Zero-Allocation Serialization)
+
+Instead of Go's reflection-heavy standard `proto.Marshal` or `json.Marshal`, all structured payloads are serialized using **PlanetScale's `vtprotobuf`** generator:
+
+- **Zero Heap Allocations:** Encodes (`MarshalVT`) and decodes (`UnmarshalVT`) binary payloads without runtime reflection or dynamic struct allocations.
+- **Wire Format Compatibility:** Fully compatible with standard Protobuf v3 specifications.
+
+### 2. PostgreSQL Engine Tuning Strategies
+
+The `Optimized PostgreSQL` configuration incorporates several database kernel optimizations:
+
+- **`UNLOGGED` Tables:** Disables Write-Ahead Logging (WAL). Eliminates disk I/O bottlenecks during cache mutations (`SET`), enabling near-in-memory write speeds.
+- **HOT (Heap-Only Tuple) Optimization (`fillfactor = 70`):** Reserves 30% page space on table blocks to allow in-place tuple updates. Reduces B-Tree index maintenance and prevents index bloat during frequent row overwrites.
+- **Non-Blocking Asynchronous Purge (`FOR UPDATE SKIP LOCKED`):** Expired cache items are purged in background batches via PL/pgSQL (`purge_expired_cache_keys()`) using non-blocking row locks. Ensures active `GET` requests never block on garbage collection.
+- **16-Byte Compact Binary Keys:** Keys are stored as native 16-byte binary UUIDs/ULIDs, maintaining a minimal B-Tree index footprint that fits completely inside PostgreSQL `shared_buffers`.
+
+### 3. Application Layer & Runtime Optimization
+
+- **`fasthttp` Core:** Replaces standard `net/http` with high-performance byte-slice parsing.
+- **Struct Pooling:** Recycles `model.UserData` domain entities via `sync.Pool` during deserialization, eliminating Garbage Collector overhead under heavy GET loads.
+- **Standardized Identifier Libraries:** Leverages `github.com/oklog/ulid/v2` for monotonic ULID generation and `github.com/google/uuid` for standard UUID operations.
+
+---
+
+## 📋 Methodology & Testing Protocol
+
+To ensure reproducible and un-biased metrics, tests adhere to a strict isolation protocol:
+
+1. **Hardware & Process Isolation:**
+   - Go Server: Bound to 4 CPU cores (`GOMAXPROCS=4`) and 10GiB memory limit (`GOMEMLIMIT=10GiB`).
+   - PostgreSQL: Constrained via `systemd` cgroups (`CPUQuota=200%`, `MemoryMax=4G`).
+   - Valkey: Constrained via `systemd` cgroups (`CPUQuota=200%`, `MemoryMax=4G`). Even if Valkey is mono-threaded, it benefits from dedicated resources to handle the I/O load.
+
+2. **OS Network Socket Tuning:**
+   - Automated TCP socket recycling (`net.ipv4.tcp_tw_reuse=1`) and ephemeral port range expansion (`1024-65535`) to prevent `TIME_WAIT` socket exhaustion under heavy load.
+
+3. **Execution Sequence:**
+   - **Dataset Population:** Pre-populates 100,000 unique keys (`gen/keys.txt`).
+   - **Warmup Phase:** 30-second target warmup to ensure cache pages and buffer pools are hot before measurement starts.
+   - **Endurance Phase:** 10-minute continuous sustained load test using Vegeta (`-rate=0`, `-workers=250`).
+
+---
+
+## 🛠️ Prerequisites & Setup
+
+### Requirements
+
+- **Go** 1.26+
+- **PostgreSQL** 18+
+- **Valkey** 9.1+ (or Redis)
+- **Vegeta** (`go install github.com/tsenart/vegeta/v12@latest`)
+- **protoc** & `protoc-gen-go-vtproto` (optional, for regenerating protobuf code)
+
+### Kernel Tuning
+
+Apply Linux TCP socket parameter adjustments prior to running benchmarks:
 
 ```bash
 make tune-os
@@ -86,59 +127,68 @@ make tune-os
 
 ---
 
-## 4. Initialisation de la Base de Données & Génération des Cibles
+## 🚀 Running the Benchmarks
 
-Avant de lancer le serveur, créez le schéma de base de données et préparez les jeux de données :
-
-```bash
-# Pour le mode Standard PostgreSQL
-psql -U postgres -d postgres -f internal/infrastructure/postgresql/standard/schema.sql
-
-# Pour le mode Optimized PostgreSQL
-psql -U postgres -d postgres -f internal/infrastructure/postgresql/optimized/schema.sql
-```
-
-### Génération du Fichier de Clés & Hydratation de Vegeta
-
-Un outil dédié (`cmd/gentargets`) génère un fichier `keys.txt` rempli de 100 000 clés ULID/UUID ainsi que les fichiers de cibles Vegeta (`targets_*_get.txt` et `targets_*_set.txt`) :
+### 1. Build & Generate Test Data
 
 ```bash
-make gen-targets
-```
-
----
-
-## 5. Exécution des Benchmarks
-
-### Utilisation Rapide via le Makefile
-
-Le Makefile gère la compilation, la génération des cibles, l'arrêt/démarrage des services, le préchauffage, et le benchmark HTTP via **Vegeta** :
-
-```bash
-# Compiler le serveur Go
+# Compile server binary (bin/server)
 make build
 
-# Exécuter le benchmark rapide de validation (5 secondes par test)
+# Generate 100,000 ULID test keys in gen/keys.txt
+make gen-targets
+
+# (Optional) Regenerate Protobuf VTProto code
+make proto-gen
+```
+
+### 2. Execute Benchmark Suites
+
+The Makefile provides three execution durations:
+
+```bash
+# Quick validation smoke test (5 seconds per engine)
 make quick
 
-# Exécuter le benchmark intermédiaire (60 secondes par test)
+# Medium benchmark run (300 seconds per engine)
 make medium
 
-# Exécuter le benchmark officiel d'endurance (10 minutes par test)
+# Official endurance test (600 seconds / 10 minutes per engine)
 make long
 ```
 
-### Lancement Manuel du Serveur & de Vegeta
+### 3. Manual Server Execution
+
+To run a specific engine manually for profiling or debugging:
 
 ```bash
-# Lancer le serveur
-./bin/server -engine optimized-postgresql
+# Launch server for a specific storage engine
+./bin/server -engine optimized-postgresql -log-level production
 
-# Dans un autre terminal, exécuter l'attaque Vegeta avec le fichier de cibles
-vegeta attack -rate=0 -workers=250 -duration=60s -targets=targets_postgres_get.txt | vegeta report
+# Execute Vegeta load test in a separate terminal
+(while cat gen/keys.txt; do :; done) | \
+  sed 's|^|GET http://127.0.0.1:8080/postgres/get?id=|' | \
+  vegeta attack -lazy -rate=0 -workers=250 -duration=60s | \
+  vegeta report
 ```
 
-_Endpoints HTTP exposés sur `:8080` :_
+#### Exposed HTTP Endpoints (`:8080`)
 
-- GET : `/memory/get`, `/valkey/get`, `/postgres/get`
-- POST : `/memory/set`, `/valkey/set`, `/postgres/set`
+| Engine                 | GET Endpoint                 | POST Endpoint                 |
+| :--------------------- | :--------------------------- | :---------------------------- |
+| **In-Memory**          | `GET /memory/get?id=<KEY>`   | `POST /memory/set?id=<KEY>`   |
+| **Valkey**             | `GET /valkey/get?id=<KEY>`   | `POST /valkey/set?id=<KEY>`   |
+| **Standard Postgres**  | `GET /postgres/get?id=<KEY>` | `POST /postgres/set?id=<KEY>` |
+| **Optimized Postgres** | `GET /postgres/get?id=<KEY>` | `POST /postgres/set?id=<KEY>` |
+
+---
+
+## 📊 Benchmark Results
+
+> ℹ️ _Official endurance results (10-minute continuous load suite) will be added here upon completion of the benchmark execution._
+
+---
+
+## 📄 License
+
+This repository is distributed under the MIT License. See `LICENSE` for details.

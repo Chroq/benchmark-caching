@@ -112,7 +112,7 @@ tune-os:
 	@sudo -n sysctl -w net.ipv4.tcp_fin_timeout=15 2>/dev/null || true
 	@sudo -n systemctl set-property postgresql CPUQuota=200% 2>/dev/null || true
 	@sudo -n systemctl set-property postgresql MemoryMax=4G 2>/dev/null || true
-	@sudo -n systemctl set-property valkey CPUQuota=100% 2>/dev/null || true
+	@sudo -n systemctl set-property valkey CPUQuota=200% 2>/dev/null || true
 	@sudo -n systemctl set-property valkey MemoryMax=4G 2>/dev/null || true
 	@echo "OS network tuning complete."
 
