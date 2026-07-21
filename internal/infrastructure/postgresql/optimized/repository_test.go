@@ -54,9 +54,9 @@ func TestOptimizedRepository(t *testing.T) {
 
 	repo := optimized.NewRepository(pool)
 
-	_, err = pool.Exec(ctx, "SELECT manage_cache_partitions()")
+	_, err = pool.Exec(ctx, "SELECT purge_expired_cache_keys(10000)")
 	if err != nil {
-		t.Fatalf("Failed to execute manage_cache_partitions(): %v", err)
+		t.Fatalf("Failed to execute purge_expired_cache_keys(10000): %v", err)
 	}
 
 	gen, err := ulid.NewULIDGenerator()

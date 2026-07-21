@@ -1,121 +1,85 @@
 -- ============================================================================
--- OPTIMIZED CACHE SCHEMA (OPTIMIZED POSTGRESQL)
+-- OPTIMIZED CACHE SCHEMA (PRAGMATIC & HIGH-PERFORMANCE)
 -- ============================================================================
--- Optimized for High-Performance Key-Value Store caching.
--- Includes:
--- 1. UNLOGGED partitioned parent table, 16-byte UUID/ULID key, Protobuf value.
--- 2. Automated partition management via function (manage_cache_partitions).
--- 3. Automated partition management via pg_cron (optional).
+-- Principles:
+-- 1. Simple UNLOGGED table: no WAL writing (near in-memory speed).
+-- 2. Unique primary key on `key` (UUID): direct B-Tree lookup (< 1ms).
+-- 3. Fillfactor set to 70: reserves page space for updates (HOT Updates).
+-- 4. Asynchronous non-blocking cleanup via pg_cron + Batching (DELETE in batches of 10,000).
 -- ============================================================================
 
--- Enable pg_cron extension if not already present
--- Note: 'pg_cron' must also be listed in shared_preload_libraries in postgresql.conf
--- CREATE EXTENSION IF NOT EXISTS pg_cron;
-
--- ============================================================================
--- PART I: OPTIMIZED CACHE SCHEMA
--- ============================================================================
--- Create Parent Table (standard logged table to support unlogged partitions)
--- A composite primary key is used because in partitioned tables, the partition key
--- (expires_at) must be part of any unique/primary key constraints.
-CREATE TABLE IF NOT EXISTS cache_optimized_partitioned (
-    key UUID NOT NULL,
+-- 1. Main cache table creation
+CREATE UNLOGGED TABLE IF NOT EXISTS cache_optimized (
+    key UUID PRIMARY KEY,
     value BYTEA NOT NULL,
-    expires_at TIMESTAMP NOT NULL,
-    PRIMARY KEY (key, expires_at)
-) PARTITION BY RANGE (expires_at);
+    expires_at TIMESTAMPTZ NOT NULL
+) WITH (
+    fillfactor = 70,
+    autovacuum_enabled = false -- Disabled to avoid undesirable locks during heavy load benchmarks
+);
+
+-- 2. Secondary index on expiration timestamp to accelerate background cleanup
+CREATE INDEX IF NOT EXISTS idx_cache_optimized_expires_at 
+ON cache_optimized (expires_at);
+
 
 -- ============================================================================
--- PART II: PARTITION MAINTENANCE FUNCTION (manage_cache_partitions)
+-- SAFETY PURGE FUNCTION (BATCHED DELETE)
 -- ============================================================================
--- This function performs two main maintenance tasks:
--- 1. Preventive Creation: Provisions partition tables for the next 8 hours.
---    The tables are created as UNLOGGED with a low fillfactor (70) to optimize
---    for high-frequency UPDATEs/INSERTs and HOT (Heap-Only Tuple) updates.
--- 2. Automatic Pruning: Identifies and drops obsolete partition tables whose
---    expiration window has completely passed (end date <= NOW()).
+-- Why batching? 
+-- A massive `DELETE FROM cache_optimized WHERE expires_at < NOW()` across millions 
+-- of rows would lock the table. Deleting in batches of 10,000 rows ensures 
+-- that reads (`GET`) remain ultra-fast and fluid.
 -- ============================================================================
-CREATE OR REPLACE FUNCTION manage_cache_partitions()
-RETURNS void AS $$
+
+CREATE OR REPLACE FUNCTION purge_expired_cache_keys(batch_size INT DEFAULT 10000)
+RETURNS INT AS $$
 DECLARE
-    i integer;
-    start_time timestamp;
-    end_time timestamp;
-    partition_name text;
-    r record;
-    parts text[];
-    part_start timestamp;
-    part_end timestamp;
+    deleted_count INT := 0;
+    current_deleted INT := 0;
 BEGIN
-    -- ------------------------------------------------------------------------
-    -- PREVENTIVE CREATION (Pre-provision partitions for the next 8 hours)
-    -- ------------------------------------------------------------------------
-    FOR i IN 0..8 LOOP
-        -- Truncate current and future times to the beginning of the hour in UTC
-        start_time := date_trunc('hour', timezone('utc', now()) + (i || ' hour')::interval);
-        end_time := start_time + interval '1 hour';
+    LOOP
+        WITH keys_to_delete AS (
+            SELECT key FROM cache_optimized 
+            WHERE expires_at <= NOW()
+            LIMIT batch_size
+            FOR UPDATE SKIP LOCKED -- Does not lock rows currently in use
+        )
+        DELETE FROM cache_optimized
+        WHERE key IN (SELECT key FROM keys_to_delete);
         
-        -- Construct partition table name: cache_opt_partition_YYYY_MM_DD_HH
-        partition_name := 'cache_opt_partition_' || to_char(start_time, 'YYYY_MM_DD_HH24');
-        
-        -- Create the partition table. 
-        -- Specifying UNLOGGED explicitly and setting fillfactor = 70 to reserve page 
-        -- space for cache updates/expirations.
-        EXECUTE format(
-            'CREATE UNLOGGED TABLE IF NOT EXISTS %I PARTITION OF cache_optimized_partitioned ' ||
-            'FOR VALUES FROM (%L) TO (%L) WITH (fillfactor = 70, autovacuum_enabled = false);',
-            partition_name,
-            start_time,
-            end_time
-        );
+        GET DIAGNOSTICS current_deleted = ROW_COUNT;
+        deleted_count := deleted_count + current_deleted;
+
+        -- If fewer keys than batch_size were deleted, the purge is complete
+        EXIT WHEN current_deleted < batch_size;
     END LOOP;
 
-    -- ------------------------------------------------------------------------
-    -- AUTOMATIC PRUNING (Drop partitions older than or equal to NOW() in UTC)
-    -- ------------------------------------------------------------------------
-    FOR r IN (
-        SELECT nmsp_child.nspname AS schema_name, tbl_child.relname AS partition_name
-        FROM pg_inherits
-        JOIN pg_class tbl_parent ON pg_inherits.inhparent = tbl_parent.oid
-        JOIN pg_class tbl_child ON pg_inherits.inhrelid = tbl_child.oid
-        JOIN pg_namespace nmsp_child ON tbl_child.relnamespace = nmsp_child.oid
-        WHERE tbl_parent.relname = 'cache_optimized_partitioned'
-    ) LOOP
-        -- Match names conforming to our partition naming convention
-        parts := regexp_match(r.partition_name, '^cache_opt_partition_(\d{4})_(\d{2})_(\d{2})_(\d{2})$');
-        IF parts IS NOT NULL THEN
-            -- Reconstruct the start timestamp from the partition name
-            part_start := to_timestamp(parts[1] || '-' || parts[2] || '-' || parts[3] || ' ' || parts[4] || ':00:00', 'YYYY-MM-DD HH24:MI:SS');
-            -- End of the 1-hour interval partition
-            part_end := part_start + interval '1 hour';
-            
-            -- If the partition's entire hour is in the past, drop the table to reclaim disk space instantly
-            IF part_end <= timezone('utc', now()) THEN
-                EXECUTE format('DROP TABLE IF EXISTS %I.%I CASCADE;', r.schema_name, r.partition_name);
-            END IF;
-        END IF;
-    END LOOP;
+    RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
 
--- Run the partition manager immediately to bootstrap partitions for the first 8 hours
-SELECT manage_cache_partitions();
 
 -- ============================================================================
--- PG_CRON SCHEDULE
+-- CRON JOB (PG_CRON) - BACKGROUND CLEANUP
 -- ============================================================================
--- Safe idempotent schedule registration. Only executes if pg_cron is active.
+-- Automatically executes the purge function every minute.
+-- Only activates if the pg_cron extension is loaded on the DB.
+-- ============================================================================
+
 DO $$
 BEGIN
     IF to_regclass('cron.job') IS NOT NULL THEN
-        -- Unschedule any existing job of the same name
-        PERFORM cron.unschedule(jobid) FROM cron.job WHERE jobname = 'manage_cache_partitions_job';
+        -- Unschedule any existing job of the same name (Idempotency)
+        PERFORM cron.unschedule(jobid) 
+        FROM cron.job 
+        WHERE jobname = 'purge_expired_cache_keys_job';
 
-        -- Register the pg_cron job to execute the maintenance task once every hour at minute 0
+        -- Schedule: Execution every minute (e.g. `* * * * *`)
         PERFORM cron.schedule(
-            'manage_cache_partitions_job',
-            '0 * * * *',
-            'SELECT manage_cache_partitions();'
+            'purge_expired_cache_keys_job',
+            '* * * * *',
+            'SELECT purge_expired_cache_keys(10000);'
         );
     END IF;
 END

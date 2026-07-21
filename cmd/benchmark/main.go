@@ -48,7 +48,7 @@ func main() {
 
 	// 4. Setup storage engine repository & instantiate domain UserUseCase service
 	ctx := context.Background()
-	userUseCase, err := bootstrap.SetupUseCase(ctx, cfg, globalKeys)
+	userUseCase, cleanup, err := bootstrap.SetupUseCase(ctx, cfg, globalKeys)
 	if err != nil {
 		slog.Error("Failed to setup benchmark use case", "error", err)
 		os.Exit(1)
@@ -82,6 +82,11 @@ func main() {
 
 	if err := server.Shutdown(); err != nil {
 		slog.Error("FastHTTP graceful shutdown failed", "error", err)
+	}
+
+	slog.Info("Closing repository and database connections...")
+	if cleanup != nil {
+		cleanup()
 	}
 
 	slog.Info("Shutdown complete.")

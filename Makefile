@@ -102,6 +102,11 @@ tune-os:
 	@sudo -n sysctl -w net.ipv4.ip_local_port_range="1024 65535" 2>/dev/null || true
 	@sudo -n sysctl -w net.core.somaxconn=65535 2>/dev/null || true
 	@sudo -n sysctl -w net.ipv4.tcp_max_syn_backlog=65535 2>/dev/null || true
+	@sudo -n sysctl -w net.ipv4.tcp_fin_timeout=15 2>/dev/null || true
+	@sudo systemctl set-property postgresql CPUQuota=200%
+	@sudo systemctl set-property postgresql MemoryMax=4G
+	@sudo systemctl set-property valkey CPUQuota=100%
+	@sudo systemctl set-property valkey MemoryMax=4G
 	@echo "OS network tuning complete."
 
 # Master orchestrator running benchmarks sequentially
@@ -161,8 +166,8 @@ define run_bench
 	$(call manage_services,$(1))
 	echo "Ensuring port $(PORT) is clear..." ; \
 	pids=$$(lsof -t -i:$(PORT) 2>/dev/null) ; if [ -n "$$pids" ]; then kill -9 $$pids 2>/dev/null || true ; fi ; \
-	echo "Starting server with GOMAXPROCS=4 and GOMEMLIMIT=8GiB..." ; \
-	GOMAXPROCS=4 GOMEMLIMIT=8GiB ./bin/server -engine $(1) -log-level $(LOG_LEVEL) & pid=$$! ; \
+	echo "Starting server with GOMAXPROCS=4 and GOMEMLIMIT=10GiB..." ; \
+	GOMAXPROCS=4 GOMEMLIMIT=10GiB ./bin/server -engine $(1) -log-level $(LOG_LEVEL) & pid=$$! ; \
 	echo "Waiting for server (PID $$pid) to be ready on port $(PORT)..." ; \
 	for i in $$(seq 1 1200); do \
 		if curl -s http://127.0.0.1:$(PORT)/health >/dev/null; then \

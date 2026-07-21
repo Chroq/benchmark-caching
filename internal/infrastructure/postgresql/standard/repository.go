@@ -32,6 +32,14 @@ func NewStandardRepository(pool *pgxpool.Pool) output.StandardUserRepository {
 	return NewRepository(pool)
 }
 
+// Close closes the underlying PostgreSQL connection pool.
+func (r *StandardRepository) Close() error {
+	if r.pool != nil {
+		r.pool.Close()
+	}
+	return nil
+}
+
 // Get retrieves a UserData by its 16-byte UUID from the relational table users_standard.
 func (r *StandardRepository) Get(ctx context.Context, id [16]byte, dest *model.UserData) (bool, error) {
 	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)

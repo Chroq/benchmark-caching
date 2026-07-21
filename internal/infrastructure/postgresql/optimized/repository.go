@@ -31,12 +31,20 @@ func NewOptimizedRepository(pool *pgxpool.Pool) output.OptimizedUserRepository {
 	return NewRepository(pool)
 }
 
-// Get retrieves a UserData by its 16-byte ULID by querying the partitioned parent table.
+// Close closes the underlying PostgreSQL connection pool.
+func (r *OptimizedRepository) Close() error {
+	if r.pool != nil {
+		r.pool.Close()
+	}
+	return nil
+}
+
+// Get retrieves a UserData by its 16-byte ULID by querying the unlogged cache_optimized table.
 func (r *OptimizedRepository) Get(ctx context.Context, id [16]byte, dest *model.UserData) (bool, error) {
 	var value []byte
 
 	err := r.pool.QueryRow(ctx,
-		"SELECT value FROM cache_optimized_partitioned WHERE key = $1",
+		"SELECT value FROM cache_optimized WHERE key = $1",
 		id,
 	).Scan(&value)
 
@@ -54,7 +62,7 @@ func (r *OptimizedRepository) Get(ctx context.Context, id [16]byte, dest *model.
 	return true, nil
 }
 
-// Set stores a UserData serialized to Protobuf with a ULID key into the partitioned cache table.
+// Set stores a UserData serialized to Protobuf with a ULID key into the cache_optimized table.
 func (r *OptimizedRepository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
 	if ttl <= 0 {
 		ttl = 2 * time.Hour
@@ -66,7 +74,7 @@ func (r *OptimizedRepository) Set(ctx context.Context, user *model.UserData, ttl
 		return fmt.Errorf("optimized protobuf encode error: %w", err)
 	}
 
-	query := "INSERT INTO cache_optimized_partitioned (key, value, expires_at) VALUES ($1, $2, $3) ON CONFLICT (key, expires_at) DO UPDATE SET value = EXCLUDED.value"
+	query := "INSERT INTO cache_optimized (key, value, expires_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at"
 
 	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

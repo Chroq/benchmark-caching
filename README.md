@@ -41,14 +41,13 @@ Le projet implémente et compare 4 configurations de moteurs de cache :
 
 ### D. Optimized PostgreSQL
 
-- **Description :** Configuration tirant parti des fonctionnalités avancées de PostgreSQL pour simuler un comportement de cache transient.
+- **Description :** Configuration tirant parti des fonctionnalités avancées de PostgreSQL pour simuler un comportement de cache transitoire ultra-performant.
 - **Optimisations implémentées :**
-  1.  **Tables `UNLOGGED` :** Désactivation du journal de transactions (WAL - Write-Ahead Logging). Élimine les goulots d'étranglement d'I/O disque liés aux écritures WAL.
-  2.  **Partitionnement Temporel Automatique :** La table parent `cache_optimized_partitioned` est découpée en partitions physiques de 1 heure. L'invalidation se fait en supprimant directement une partition entière via `DROP TABLE`, éliminant les `DELETE` massifs et les `VACUUM` coûteux.
-  3.  **Facteur de Remplissage (`fillfactor = 70`) :** Les tables filles réservent 30% d'espace libre par page. Les mises à jour (`UPDATE`) s'insèrent dans la même page physique (mécanisme _HOT_), évitant la réécriture d'index.
-  4.  **Clés Binaires UUID/ULID :** Clé primaire indexée sur 16 octets réels, réduisant la taille des index.
-  5.  **Sérialisation Protobuf Sans Réflexion :** Les objets Go sont sérialisés au format Protobuf binaire avec zéro allocation.
-  6.  **Requêtes Préparées Globales :** Enregistrement des requêtes SQL lors de la connexion initiale (`pgxpool.Config.AfterConnect`).
+  1.  **Table `UNLOGGED` :** Désactivation du journal de transactions (WAL - Write-Ahead Logging). Élimine les goulots d'étranglement d'I/O disque liés aux écritures WAL (vitesse proche du in-memory).
+  2.  **Purge Asynchrone Non-Bloquante par Lots :** Invalidation via une fonction PL/pgSQL (`purge_expired_cache_keys`) exécutée régulièrement par `pg_cron` qui supprime les clés expirées par lots (`DELETE` par tranches de 10 000 avec `FOR UPDATE SKIP LOCKED`), préservant la fluidité des lectures (`GET`).
+  3.  **Facteur de Remplissage (`fillfactor = 70`) :** La table réserve 30% d'espace libre par page physique pour favoriser les mises à jour en place (mécanisme _HOT_ - Heap-Only Tuple) sans réécrire les index.
+  4.  **Clés Binaires UUID/ULID :** Clé primaire `key UUID` indexée directement sur 16 octets réels pour des recherches B-Tree instantanées (< 1ms).
+  5.  **Sérialisation Protobuf Sans Réflexion :** Les objets Go sont sérialisés au format Protobuf binaire avec zéro allocation mémoire.
 
 ---
 
@@ -66,13 +65,13 @@ Le projet implémente et compare 4 configurations de moteurs de cache :
 Pour garantir une comparaison équitable, le serveur Go, PostgreSQL et Valkey doivent être limités en ressources système sous Linux :
 
 ```bash
-# Limiter PostgreSQL à 2 cœurs CPU et 2 Go de RAM
+# Limiter PostgreSQL à 2 cœurs CPU et 4 Go de RAM
 sudo systemctl set-property postgresql CPUQuota=200%
-sudo systemctl set-property postgresql MemoryMax=2G
+sudo systemctl set-property postgresql MemoryMax=4G
 
-# Limiter Valkey à 1 cœur CPU et 2 Go de RAM
+# Limiter Valkey à 1 cœur CPU et 4 Go de RAM
 sudo systemctl set-property valkey-server CPUQuota=100%
-sudo systemctl set-property valkey-server MemoryMax=2G
+sudo systemctl set-property valkey-server MemoryMax=4G
 ```
 
 ### Optimisation Réseau (TIME_WAIT Exhaustion)

@@ -2,8 +2,11 @@ package valkey
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/Chroq/benchmark-caching/internal/config"
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/serializer"
 	"github.com/Chroq/benchmark-caching/pkg/ulid"
@@ -15,11 +18,49 @@ type Repository struct {
 	client *redis.Client
 }
 
-// NewRepository creates a new Valkey repository instance.
+// NewClient initializes a Valkey client pool with connection retry support.
+func NewClient(ctx context.Context, cfg *config.Config) (*redis.Client, error) {
+	slog.Info("Initializing Valkey Client Pool (PoolSize=2500)...")
+	rdb := redis.NewClient(&redis.Options{
+		Addr:         cfg.ValkeyURL,
+		PoolSize:     2500,
+		MinIdleConns: 200,
+		ReadTimeout:  5 * time.Minute,
+		WriteTimeout: 5 * time.Minute,
+	})
+
+	var pingErr error
+	for i := range 5 {
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		pingErr = rdb.Ping(pingCtx).Err()
+		cancel()
+		if pingErr == nil {
+			break
+		}
+		slog.Info("Valkey connection failed, retrying in 1s...", "attempt", i+1, "error", pingErr)
+		time.Sleep(1 * time.Second)
+	}
+	if pingErr != nil {
+		_ = rdb.Close()
+		return nil, fmt.Errorf("valkey connection failed after retries: %w", pingErr)
+	}
+
+	return rdb, nil
+}
+
+// NewRepository creates a new Valkey repository instance using the injected client.
 func NewRepository(client *redis.Client) *Repository {
 	return &Repository{
 		client: client,
 	}
+}
+
+// Close closes the underlying Valkey client pool.
+func (r *Repository) Close() error {
+	if r.client != nil {
+		return r.client.Close()
+	}
+	return nil
 }
 
 // Get fetches a UserData using the ULID key into a destination struct.

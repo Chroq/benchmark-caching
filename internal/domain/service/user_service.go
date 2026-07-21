@@ -27,3 +27,10 @@ func (s *UserService) GetUser(ctx context.Context, id [16]byte, dest *model.User
 func (s *UserService) SetUser(ctx context.Context, user *model.UserData, ttl time.Duration) error {
 	return s.repo.Set(ctx, user, ttl)
 }
+
+func (s *UserService) Close() error {
+	if s.repo != nil {
+		return s.repo.Close()
+	}
+	return nil
+}

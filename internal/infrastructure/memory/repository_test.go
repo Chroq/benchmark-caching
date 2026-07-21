@@ -10,7 +10,9 @@ import (
 )
 
 func TestOtterRepository_GetSet(t *testing.T) {
-	repo := memory.NewRepository()
+	cache := memory.NewCache()
+	repo := memory.NewRepository(cache)
+	defer repo.Close()
 	ctx := context.Background()
 
 	id := model.ID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
@@ -40,7 +42,9 @@ func TestOtterRepository_GetSet(t *testing.T) {
 }
 
 func TestOtterRepository_TTLExpiration(t *testing.T) {
-	repo := memory.NewRepository()
+	cache := memory.NewCache()
+	repo := memory.NewRepository(cache)
+	defer repo.Close()
 	ctx := context.Background()
 
 	id := model.ID{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}

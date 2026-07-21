@@ -17,4 +17,4 @@ CREATE TABLE IF NOT EXISTS users_standard (
 );
 
 -- Disable autovacuum to prevent background I/O interference during benchmarks
-ALTER TABLE users_standard SET (autovacuum_enabled = false);
+-- ALTER TABLE users_standard SET (autovacuum_enabled = false);
