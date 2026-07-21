@@ -10,8 +10,8 @@ import (
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/domain/port/input"
-	"github.com/Chroq/benchmark-caching/pkg/ulid"
-	"github.com/Chroq/benchmark-caching/pkg/uuid"
+	googleuuid "github.com/google/uuid"
+	oklogulid "github.com/oklog/ulid/v2"
 	"github.com/valyala/fasthttp"
 )
 
@@ -88,11 +88,12 @@ func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
 
 func (h *Handler) getKeyFromRequest(ctx *fasthttp.RequestCtx) ([16]byte, error) {
 	idParam := ctx.QueryArgs().Peek("id")
-	if len(idParam) == 36 {
-		if parsed, err := ulid.ParseULID(string(idParam)); err == nil {
+	if len(idParam) == 26 {
+		if parsed, err := oklogulid.Parse(string(idParam)); err == nil {
 			return parsed, nil
 		}
-		if parsed, err := uuid.ParseUUID(string(idParam)); err == nil {
+	} else if len(idParam) == 36 {
+		if parsed, err := googleuuid.Parse(string(idParam)); err == nil {
 			return parsed, nil
 		}
 	}

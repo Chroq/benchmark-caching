@@ -2,15 +2,16 @@ package optimized_test
 
 import (
 	"context"
+	"crypto/rand"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/postgresql/optimized"
-	"github.com/Chroq/benchmark-caching/pkg/ulid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	oklogulid "github.com/oklog/ulid/v2"
 )
 
 func TestOptimizedRepository(t *testing.T) {
@@ -59,14 +60,10 @@ func TestOptimizedRepository(t *testing.T) {
 		t.Fatalf("Failed to execute purge_expired_cache_keys(10000): %v", err)
 	}
 
-	gen, err := ulid.NewULIDGenerator()
-	if err != nil {
-		t.Fatalf("NewULIDGenerator failed: %v", err)
-	}
-	ulidVal := gen.GenerateULID()
+	ulidVal := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), rand.Reader)
 
 	user := &model.UserData{
-		ID:        ulidVal,
+		ID:        model.ID(ulidVal),
 		FirstName: "Optimized",
 		LastName:  "User",
 		BirthDate: 946684800,
@@ -82,7 +79,7 @@ func TestOptimizedRepository(t *testing.T) {
 	}
 
 	var retrieved model.UserData
-	found, err := repo.Get(ctx, ulidVal, &retrieved)
+	found, err := repo.Get(ctx, model.ID(ulidVal), &retrieved)
 	if err != nil {
 		t.Fatalf("Optimized Get failed: %v", err)
 	}

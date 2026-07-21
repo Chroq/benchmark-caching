@@ -2,12 +2,14 @@ package seeder
 
 import (
 	"bufio"
-	"fmt"
+	"crypto/rand"
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/Chroq/benchmark-caching/pkg/ulid"
+	googleuuid "github.com/google/uuid"
+	oklogulid "github.com/oklog/ulid/v2"
 )
 
 // GenerateKeys constructs the dataset of distinct ULID keys.
@@ -30,8 +32,14 @@ func GenerateKeys(count int) [][16]byte {
 			if len(line) == 0 {
 				continue
 			}
-			if key, err := ulid.ParseULID(line); err == nil {
-				globalKeys = append(globalKeys, key)
+			if len(line) == 26 {
+				if key, err := oklogulid.Parse(line); err == nil {
+					globalKeys = append(globalKeys, key)
+				}
+			} else if len(line) == 36 {
+				if key, err := googleuuid.Parse(line); err == nil {
+					globalKeys = append(globalKeys, key)
+				}
 			}
 		}
 		_ = file.Close()
@@ -41,13 +49,9 @@ func GenerateKeys(count int) [][16]byte {
 	remaining := count - len(globalKeys)
 	if remaining > 0 {
 		slog.Info("Generating remaining ULID-based cache entries...", "count", remaining)
-		generator, err := ulid.NewULIDGenerator()
-		if err != nil {
-			panic(fmt.Sprintf("failed to create ULID generator: %v", err))
-		}
-
+		entropy := oklogulid.Monotonic(rand.Reader, 0)
 		for range remaining {
-			ulidVal := generator.GenerateULID()
+			ulidVal := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), entropy)
 			globalKeys = append(globalKeys, ulidVal)
 		}
 	}

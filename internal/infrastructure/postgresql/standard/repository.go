@@ -2,14 +2,16 @@ package standard
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/domain/port/output"
-	"github.com/Chroq/benchmark-caching/pkg/ulid"
+	oklogulid "github.com/oklog/ulid/v2"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -97,7 +99,7 @@ type standardStreamSource struct {
 	totalCount int
 	index      int
 	rowValues  []any
-	gen        *ulid.ULIDGenerator
+	entropy    io.Reader
 	now        int64
 }
 
@@ -109,7 +111,7 @@ func (s *standardStreamSource) Next() bool {
 	if s.index < len(s.globalKeys) {
 		id = s.globalKeys[s.index]
 	} else {
-		id = s.gen.GenerateULID()
+		id = oklogulid.MustNew(oklogulid.Timestamp(time.Now()), s.entropy)
 	}
 
 	s.rowValues[0] = id
@@ -144,23 +146,20 @@ func PopulateStandardTable(ctx context.Context, pool *pgxpool.Pool, globalKeys [
 
 	slog.Info("Populating users_standard with background records for realistic sizing...", "target", totalCount, "current", count)
 
-	gen, err := ulid.NewULIDGenerator()
-	if err != nil {
-		return fmt.Errorf("failed to create ULID generator: %w", err)
-	}
+	entropy := oklogulid.Monotonic(rand.Reader, 0)
 
 	source := &standardStreamSource{
 		globalKeys: globalKeys,
 		totalCount: totalCount,
 		rowValues:  make([]any, 8),
-		gen:        gen,
+		entropy:    entropy,
 		now:        time.Now().Unix(),
 	}
 
 	popCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	_, err = pool.CopyFrom(
+	_, err := pool.CopyFrom(
 		popCtx,
 		pgx.Identifier{"users_standard"},
 		[]string{"id", "first_name", "last_name", "birth_date", "active", "created_at", "updated_at", "deleted_at"},

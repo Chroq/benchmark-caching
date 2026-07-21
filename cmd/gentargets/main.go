@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
-	"github.com/Chroq/benchmark-caching/pkg/ulid"
+	oklogulid "github.com/oklog/ulid/v2"
 )
 
 func main() {
@@ -21,11 +23,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gen, err := ulid.NewULIDGenerator()
-	if err != nil {
-		fmt.Printf("Failed to create ULID generator: %v\n", err)
-		os.Exit(1)
-	}
+	entropy := oklogulid.Monotonic(rand.Reader, 0)
 
 	keysFile, err := os.Create(*outputKeys)
 	if err != nil {
@@ -37,8 +35,8 @@ func main() {
 	keysWriter := bufio.NewWriter(keysFile)
 
 	for i := 0; i < *count; i++ {
-		id := gen.GenerateULID()
-		keyStr := ulid.EncodeULID(id)
+		id := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), entropy)
+		keyStr := id.String()
 
 		_, err := fmt.Fprintf(keysWriter, "%s\n", keyStr)
 		if err != nil {

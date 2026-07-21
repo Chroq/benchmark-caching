@@ -8,7 +8,7 @@ import (
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/postgresql/standard"
-	"github.com/Chroq/benchmark-caching/pkg/uuid"
+	googleuuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -69,13 +69,10 @@ func TestStandardRepository(t *testing.T) {
 
 	repo := standard.NewRepository(pool)
 
-	uuidVal, err := uuid.NewUUID()
-	if err != nil {
-		t.Fatalf("Failed to generate UUID: %v", err)
-	}
+	uuidVal := googleuuid.New()
 
 	user := &model.UserData{
-		ID:        uuidVal,
+		ID:        model.ID(uuidVal),
 		FirstName: "Standard",
 		LastName:  "User",
 		BirthDate: 946684800,
@@ -91,7 +88,7 @@ func TestStandardRepository(t *testing.T) {
 	}
 
 	var retrieved model.UserData
-	found, err := repo.Get(ctx, uuidVal, &retrieved)
+	found, err := repo.Get(ctx, model.ID(uuidVal), &retrieved)
 	if err != nil {
 		t.Fatalf("Standard Get failed: %v", err)
 	}

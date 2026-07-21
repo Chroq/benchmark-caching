@@ -9,7 +9,7 @@ import (
 	"github.com/Chroq/benchmark-caching/internal/config"
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/serializer"
-	"github.com/Chroq/benchmark-caching/pkg/ulid"
+	oklogulid "github.com/oklog/ulid/v2"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -65,7 +65,7 @@ func (r *Repository) Close() error {
 
 // Get fetches a UserData using the ULID key into a destination struct.
 func (r *Repository) Get(ctx context.Context, id [16]byte, dest *model.UserData) (bool, error) {
-	keyStr := ulid.EncodeULID(id)
+	keyStr := oklogulid.ULID(id).String()
 
 	val, err := r.client.Get(ctx, keyStr).Bytes()
 	if err != nil {
@@ -84,7 +84,7 @@ func (r *Repository) Get(ctx context.Context, id [16]byte, dest *model.UserData)
 
 // Set stores a UserData using the ULID key.
 func (r *Repository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
-	keyStr := ulid.EncodeULID(user.ID)
+	keyStr := oklogulid.ULID(user.ID).String()
 
 	val, err := serializer.MarshalProtobuf(user)
 	if err != nil {

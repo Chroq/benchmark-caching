@@ -1,24 +1,21 @@
 package serializer_test
 
 import (
+	"crypto/rand"
 	"testing"
 	"time"
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/serializer"
-	"github.com/Chroq/benchmark-caching/pkg/ulid"
+	oklogulid "github.com/oklog/ulid/v2"
 )
 
 func TestProtobufSerialization(t *testing.T) {
-	generator, err := ulid.NewULIDGenerator()
-	if err != nil {
-		t.Fatalf("NewULIDGenerator failed: %v", err)
-	}
-	id := generator.GenerateULID()
+	id := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), rand.Reader)
 
 	now := time.Now().Unix()
 	user := model.UserData{
-		ID:        id,
+		ID:        model.ID(id),
 		FirstName: "Jean-Sébastien",
 		LastName:  "Bach",
 		BirthDate: -6468729600,
