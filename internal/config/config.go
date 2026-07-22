@@ -17,7 +17,7 @@ type Config struct {
 
 // LoadConfig parses command line flags and environment variables into Config.
 func LoadConfig() *Config {
-	engine := flag.String("engine", "optimized-postgresql", "Storage engine to benchmark (memory, valkey, optimized-postgresql, standard-postgresql)")
+	engine := flag.String("engine", "optimized-postgresql", "Storage engine to benchmark (memory, valkey, optimized-postgresql, standard-postgresql, postgres-tsid)")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error, production)")
 	flag.Parse()
 

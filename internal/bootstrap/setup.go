@@ -35,20 +35,27 @@ func SetupUseCase(ctx context.Context, cfg *config.Config, globalKeys [][16]byte
 		}
 		repo = valkey.NewRepository(client)
 
-	case "optimized-postgresql", "standard-postgresql":
+	case "optimized-postgresql", "standard-postgresql", "postgres-tsid", "standard-postgresql-tsid":
 		slog.Info("Initializing PostgreSQL pool with migrations...", "engine", cfg.Engine)
 		pool, err := postgresql.NewPool(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to instantiate PostgreSQL pool: %w", err)
 		}
 
-		if cfg.Engine == "standard-postgresql" {
+		switch cfg.Engine {
+		case "standard-postgresql":
 			repo = standard.NewRepository(pool)
 			if err := standard.PopulateStandardTable(ctx, pool, globalKeys, 10_000_000); err != nil {
 				_ = repo.Close()
 				return nil, nil, fmt.Errorf("failed to populate standard postgresql dataset: %w", err)
 			}
-		} else {
+		case "postgres-tsid", "standard-postgresql-tsid":
+			repo = postgresql.NewTSIDRepository(pool)
+			if err := postgresql.PopulateTSIDTable(ctx, pool, globalKeys, 10_000_000); err != nil {
+				_ = repo.Close()
+				return nil, nil, fmt.Errorf("failed to populate tsid postgresql dataset: %w", err)
+			}
+		default:
 			repo = optimized.NewRepository(pool)
 		}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 
@@ -66,14 +67,14 @@ func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
 			ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
 		}
 
-	case "/memory/get", "/valkey/get", "/postgres/get":
+	case "/memory/get", "/valkey/get", "/postgres/get", "/postgres-tsid/get":
 		if ctx.IsGet() {
 			h.HandleGet(ctx)
 		} else {
 			ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
 		}
 
-	case "/memory/set", "/valkey/set", "/postgres/set":
+	case "/memory/set", "/valkey/set", "/postgres/set", "/postgres-tsid/set":
 		if ctx.IsPost() {
 			h.HandleSet(ctx)
 		} else {
@@ -95,6 +96,12 @@ func (h *Handler) getKeyFromRequest(ctx *fasthttp.RequestCtx) ([16]byte, error) 
 	} else if len(idParam) == 36 {
 		if parsed, err := googleuuid.ParseBytes(idParam); err == nil {
 			return parsed, nil
+		}
+	} else if len(idParam) > 0 {
+		if tsidVal, err := strconv.ParseInt(string(idParam), 10, 64); err == nil {
+			var key [16]byte
+			binary.BigEndian.PutUint64(key[:8], uint64(tsidVal))
+			return key, nil
 		}
 	}
 	return [16]byte{}, errInvalidID

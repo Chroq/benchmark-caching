@@ -33,8 +33,11 @@ func RunMigrations(ctx context.Context, databaseURL string, engine string) error
 	}
 
 	schemaFile := "internal/infrastructure/postgresql/optimized/schema.sql"
-	if engine == "standard-postgresql" {
+	switch engine {
+	case "standard-postgresql":
 		schemaFile = "internal/infrastructure/postgresql/standard/schema.sql"
+	case "postgres-tsid", "standard-postgresql-tsid":
+		schemaFile = "internal/infrastructure/postgresql/tsid/schema.sql"
 	}
 
 	slog.Info("Executing database migrations...", "schemaFile", schemaFile)
@@ -90,7 +93,8 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 	pgConfig.MaxConnIdleTime = 30 * time.Minute
 	pgConfig.MaxConnLifetime = 5 * time.Minute
 
-	if cfg.Engine == "standard-postgresql" {
+	switch cfg.Engine {
+	case "standard-postgresql":
 		pgConfig.AfterConnect = func(connectCtx context.Context, conn *pgx.Conn) error {
 			_, errStdGet := conn.Prepare(connectCtx, "get_user_standard",
 				"SELECT id, first_name, last_name, birth_date, active, created_at, updated_at, deleted_at FROM users_standard WHERE id = $1")
@@ -105,7 +109,22 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 			}
 			return nil
 		}
-	} else if cfg.Engine == "optimized-postgresql" {
+	case "postgres-tsid", "standard-postgresql-tsid":
+		pgConfig.AfterConnect = func(connectCtx context.Context, conn *pgx.Conn) error {
+			_, errTsidGet := conn.Prepare(connectCtx, "get_user_tsid",
+				"SELECT id, first_name, last_name, birth_date, active, created_at, updated_at, deleted_at FROM users_tsid WHERE id = $1")
+			_, errTsidSet := conn.Prepare(connectCtx, "set_user_tsid",
+				"INSERT INTO users_tsid (id, first_name, last_name, birth_date, active, created_at, updated_at, deleted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO UPDATE SET first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, birth_date = EXCLUDED.birth_date, active = EXCLUDED.active, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at")
+
+			if errTsidGet != nil {
+				return errTsidGet
+			}
+			if errTsidSet != nil {
+				return errTsidSet
+			}
+			return nil
+		}
+	case "optimized-postgresql":
 		pgConfig.AfterConnect = func(connectCtx context.Context, conn *pgx.Conn) error {
 			_, errOptGet := conn.Prepare(connectCtx, "get_user_optimized",
 				"SELECT value FROM cache_optimized WHERE key = $1 AND expires_at > $2")

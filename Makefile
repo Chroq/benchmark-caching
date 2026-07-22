@@ -30,7 +30,7 @@ export DATABASE_URL
 export VALKEY_URL
 export LOG_LEVEL
 
-.PHONY: all build clean run-all quick medium long bench-memory bench-valkey bench-standard-postgres bench-opt-postgres gen-targets clean-bench tune-os
+.PHONY: all build clean run-all quick medium long bench-memory bench-valkey bench-standard-postgres bench-opt-postgres bench-tsid-postgres gen-targets clean-bench tune-os
 
 # Run the complete test suite sequentially (600s default)
 all:
@@ -57,7 +57,7 @@ build:
 
 # Generate ULID/UUID keys and Vegeta attack target files
 gen-targets:
-	@echo "=== Generating 100k ULID Keys in gen/keys.txt ==="
+	@echo "=== Generating 100k UUID v7 Keys in gen/keys.txt ==="
 	@mkdir -p gen
 	@go run ./cmd/gentargets -count=100000 -keys-file=gen/keys.txt
 
@@ -73,12 +73,12 @@ define run_suite
     if [ -n "$(TARGET_OUT)" ]; then \
         echo "=== Running benchmark suite -> saving cleaned metrics to $(TARGET_OUT) ===" ; \
         tmp_raw=$$(mktemp) ; \
-        $(MAKE) --no-print-directory build gen-targets run-all DURATION=$(1) > "$$tmp_raw" 2>&1 || true ; \
+        $(MAKE) --no-print-directory build run-all DURATION=$(1) > "$$tmp_raw" 2>&1 || true ; \
         awk 'BEGIN { print "========================================================"; print " CLEANED BENCHMARK RESULTS"; print "========================================================" } /ENGINE:/ { print "\n========================================================"; print $$0; print "========================================================"; next } /Executing (SET|GET) benchmark/ { print "\n--- " $$0 " ---"; next } /^(Requests|Duration|Latencies|Bytes In|Bytes Out|Success|Status Codes)/ { print $$0 }' "$$tmp_raw" > "$(TARGET_OUT)" ; \
         rm -f "$$tmp_raw" ; \
         echo "Cleaned benchmark output successfully saved to $(TARGET_OUT)" ; \
     else \
-        $(MAKE) --no-print-directory build gen-targets run-all DURATION=$(1) ; \
+        $(MAKE) --no-print-directory build run-all DURATION=$(1) ; \
     fi
 endef
 
@@ -127,22 +127,26 @@ run-all:
 	@$(call run_bench,valkey,valkey)
 	@$(call run_bench,standard-postgresql,postgres)
 	@$(call run_bench,optimized-postgresql,postgres)
+	@$(call run_bench,postgres-tsid,postgres-tsid)
 	@echo "========================================================"
 	@echo " ALL BENCHMARKS COMPLETED SUCCESSFULLY"
 	@echo "========================================================"
 
 # Specific targets to run individual tests if needed
-bench-memory: build gen-targets
+bench-memory: build
 	@$(call run_bench,memory,memory)
 
-bench-valkey: build gen-targets
+bench-valkey: build
 	@$(call run_bench,valkey,valkey)
 
-bench-opt-postgres: build gen-targets
+bench-opt-postgres: build
 	@$(call run_bench,optimized-postgresql,postgres)
 
-bench-standard-postgres: build gen-targets
+bench-standard-postgres: build
 	@$(call run_bench,standard-postgresql,postgres)
+
+bench-tsid-postgres: build
+	@$(call run_bench,postgres-tsid,postgres-tsid)
 
 # Helper to stop postgresql / valkey services
 define manage_services
@@ -171,6 +175,15 @@ define run_bench
 	@echo "========================================================"
 	@$(MAKE) tune-os
 	$(call manage_services,$(1))
+	@if [ "$(1)" = "postgres-tsid" ] || [ "$(1)" = "standard-postgresql-tsid" ]; then \
+		echo "Generating 100k TSID keys in gen/keys.txt..." ; \
+		mkdir -p gen ; \
+		go run ./cmd/gentargets -count=100000 -keys-file=gen/keys.txt -tsid ; \
+	else \
+		echo "Generating 100k UUID v7 keys in gen/keys.txt..." ; \
+		mkdir -p gen ; \
+		go run ./cmd/gentargets -count=100000 -keys-file=gen/keys.txt ; \
+	fi
 	@echo "Ensuring port $(PORT) is clear..." ; \
 	pids=$$(lsof -t -i:$(PORT) 2>/dev/null) ; if [ -n "$$pids" ]; then kill -9 $$pids 2>/dev/null || true ; fi ; \
 	echo "Starting server with GOMAXPROCS=4 and GOMEMLIMIT=10GiB..." ; \
@@ -187,7 +200,7 @@ define run_bench
 		kill -9 $$SERVER_PID 2>/dev/null || true ; \
 		exit 1 ; \
 	fi ; \
-	if [ "$(1)" = "optimized-postgresql" ] || [ "$(1)" = "standard-postgresql" ]; then \
+	if [ "$(1)" = "optimized-postgresql" ] || [ "$(1)" = "standard-postgresql" ] || [ "$(1)" = "postgres-tsid" ]; then \
 		echo "Warm-up phase: préchauffage de PostgreSQL ($(WARMUP_DURATION))..." ; \
 		sed 's|^|POST http://127.0.0.1:$(PORT)/$(2)/set?id=|' gen/keys.txt | $(VEGETA) attack -lazy -rate=0 -workers=$(CONNECTIONS) -max-workers=$(CONNECTIONS) -duration=$(WARMUP_DURATION) 2>/dev/null >/dev/null ; \
 	fi ; \
