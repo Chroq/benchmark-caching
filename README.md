@@ -36,7 +36,7 @@ The benchmark runner executes an ultra-low-allocation HTTP service written in Go
      v                   v                           v                   v
 +----------+   +-------------------+   +--------------------+   +--------------------+
 |  Otter   |   |   Valkey 9.1      |   | Standard Postgres  |   | Optimized Postgres |
-| (Memory) |   | (Protobuf VTProto)|   | (Relational / UUID)|   | (UNLOGGED / VTProto|
+| (Memory) |   | (Protobuf VTProto)|   | (Relational / ULID)|   | (UNLOGGED / VTProto|
 +----------+   +-------------------+   +--------------------+   +--------------------+
 ```
 
@@ -49,12 +49,12 @@ The benchmark runner executes an ultra-low-allocation HTTP service written in Go
 2. **Valkey Key-Value Store**
    - **Mechanism:** Valkey 9.1 standalone instance connected via a tuned TCP connection pool (2,500 connections).
    - **Payload Format:** Protobuf binary wire format compiled via `planetscale/vtprotobuf` (`MarshalVT` / `UnmarshalVT`).
-   - **Indexing:** 26-character Base32 Crockford ULIDs backed by `github.com/oklog/ulid/v2`.
+   - **Indexing:** Standard UUID v7 strings backed by `github.com/google/uuid`.
 
 3. **Standard PostgreSQL (`Relational / Flat`)**
    - **Mechanism:** Standard relational table (`users_standard`) with individual columns per field.
    - **Queries:** Prepared statements executed at the connection layer (`pgxpool`) to eliminate SQL parsing overhead.
-   - **Indexing:** Binary UUID primary key (`UUID` / 16 bytes).
+   - **Indexing:** Monotonic 16-byte UUID v7 (RFC 9562) primary key stored in native 16-byte PostgreSQL `UUID` column (`UUID` / 16 bytes).
 
 4. **Optimized PostgreSQL (`UNLOGGED / Protobuf VTProto`)**
    - **Mechanism:** Dedicated key-value cache architecture leveraging advanced PostgreSQL internals designed for transient workloads.
@@ -78,13 +78,13 @@ The `Optimized PostgreSQL` configuration incorporates several database kernel op
 - **`UNLOGGED` Tables:** Disables Write-Ahead Logging (WAL). Eliminates disk I/O bottlenecks during cache mutations (`SET`), enabling near-in-memory write speeds.
 - **HOT (Heap-Only Tuple) Optimization (`fillfactor = 70`):** Reserves 30% page space on table blocks to allow in-place tuple updates. Reduces B-Tree index maintenance and prevents index bloat during frequent row overwrites.
 - **Non-Blocking Asynchronous Purge (`FOR UPDATE SKIP LOCKED`):** Expired cache items are purged in background batches via PL/pgSQL (`purge_expired_cache_keys()`) using non-blocking row locks. Ensures active `GET` requests never block on garbage collection.
-- **16-Byte Compact Binary Keys:** Keys are stored as native 16-byte binary UUIDs/ULIDs, maintaining a minimal B-Tree index footprint that fits completely inside PostgreSQL `shared_buffers`.
+- **16-Byte Compact Binary Keys:** Keys are stored as native 16-byte binary UUID v7 (RFC 9562), maintaining a minimal B-Tree index footprint that fits completely inside PostgreSQL `shared_buffers`.
 
 ### 3. Application Layer & Runtime Optimization
 
 - **`fasthttp` Core:** Replaces standard `net/http` with high-performance byte-slice parsing.
 - **Struct Pooling:** Recycles `model.UserData` domain entities via `sync.Pool` during deserialization, eliminating Garbage Collector overhead under heavy GET loads.
-- **Standardized Identifier Libraries:** Leverages `github.com/oklog/ulid/v2` for monotonic ULID generation and `github.com/google/uuid` for standard UUID operations.
+- **Standardized Identifier Libraries:** Leverages `github.com/google/uuid` for monotonic UUID v7 (RFC 9562) generation and standard UUID operations.
 
 ---
 

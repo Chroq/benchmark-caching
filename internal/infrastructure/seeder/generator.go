@@ -2,11 +2,9 @@ package seeder
 
 import (
 	"bufio"
-	"crypto/rand"
 	"log/slog"
 	"os"
 	"strings"
-	"time"
 
 	googleuuid "github.com/google/uuid"
 	oklogulid "github.com/oklog/ulid/v2"
@@ -48,11 +46,13 @@ func GenerateKeys(count int) [][16]byte {
 
 	remaining := count - len(globalKeys)
 	if remaining > 0 {
-		slog.Info("Generating remaining ULID-based cache entries...", "count", remaining)
-		entropy := oklogulid.Monotonic(rand.Reader, 0)
+		slog.Info("Generating remaining UUID v7 cache entries...", "count", remaining)
 		for range remaining {
-			ulidVal := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), entropy)
-			globalKeys = append(globalKeys, ulidVal)
+			id, err := googleuuid.NewV7()
+			if err != nil {
+				id = googleuuid.New()
+			}
+			globalKeys = append(globalKeys, id)
 		}
 	}
 

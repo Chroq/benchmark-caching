@@ -1,17 +1,19 @@
 package serializer_test
 
 import (
-	"crypto/rand"
 	"testing"
 	"time"
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/serializer"
-	oklogulid "github.com/oklog/ulid/v2"
+	googleuuid "github.com/google/uuid"
 )
 
 func TestProtobufSerialization(t *testing.T) {
-	id := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), rand.Reader)
+	id, err := googleuuid.NewV7()
+	if err != nil {
+		t.Fatalf("Failed to generate UUID v7: %v", err)
+	}
 
 	now := time.Now().Unix()
 	user := model.UserData{

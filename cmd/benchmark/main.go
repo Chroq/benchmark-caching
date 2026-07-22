@@ -44,7 +44,7 @@ func main() {
 
 	slog.Info("Benchmarking engine selected", "engine", cfg.Engine, "logLevel", cfg.LogLevel)
 
-	// 3. Generate ULID keys dataset
+	// 3. Generate UUID v7 keys dataset
 	globalKeys := seeder.GenerateKeys(nbKey)
 	runtime.GC()
 

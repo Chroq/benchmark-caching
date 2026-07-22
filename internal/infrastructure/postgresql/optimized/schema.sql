@@ -10,7 +10,7 @@
 
 -- 1. Main cache table creation
 CREATE UNLOGGED TABLE IF NOT EXISTS cache_optimized (
-    key UUID PRIMARY KEY,
+    key UUID PRIMARY KEY, -- 16-byte binary UUID v7 identifier (RFC 9562)
     value BYTEA NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL
 ) WITH (

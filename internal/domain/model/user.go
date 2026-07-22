@@ -4,7 +4,7 @@ type ID [16]byte
 
 // UserData represents the domain cache entry entity.
 type UserData struct {
-	ID        ID     // 16-byte raw UUID/ULID
+	ID        ID     // 16-byte raw UUID v7 (RFC 9562)
 	FirstName string // Dynamic length string
 	LastName  string // Dynamic length string
 	BirthDate int64  // Unix Timestamp

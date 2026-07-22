@@ -2,16 +2,14 @@ package standard
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"time"
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/domain/port/output"
-	oklogulid "github.com/oklog/ulid/v2"
+	googleuuid "github.com/google/uuid"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -93,7 +91,6 @@ type standardStreamSource struct {
 	totalCount int
 	index      int
 	rowValues  []any
-	entropy    io.Reader
 	now        int64
 }
 
@@ -105,7 +102,11 @@ func (s *standardStreamSource) Next() bool {
 	if s.index < len(s.globalKeys) {
 		id = s.globalKeys[s.index]
 	} else {
-		id = oklogulid.MustNew(oklogulid.Timestamp(time.Now()), s.entropy)
+		uuidVal, err := googleuuid.NewV7()
+		if err != nil {
+			uuidVal = googleuuid.New()
+		}
+		id = uuidVal
 	}
 
 	s.rowValues[0] = id
@@ -140,13 +141,10 @@ func PopulateStandardTable(ctx context.Context, pool *pgxpool.Pool, globalKeys [
 
 	slog.Info("Populating users_standard with background records for realistic sizing...", "target", totalCount, "current", count)
 
-	entropy := oklogulid.Monotonic(rand.Reader, 0)
-
 	source := &standardStreamSource{
 		globalKeys: globalKeys,
 		totalCount: totalCount,
 		rowValues:  make([]any, 8),
-		entropy:    entropy,
 		now:        time.Now().Unix(),
 	}
 

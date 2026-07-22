@@ -2,16 +2,15 @@ package optimized_test
 
 import (
 	"context"
-	"crypto/rand"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/postgresql/optimized"
+	googleuuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	oklogulid "github.com/oklog/ulid/v2"
 )
 
 func TestOptimizedRepository(t *testing.T) {
@@ -75,10 +74,13 @@ func TestOptimizedRepository(t *testing.T) {
 		t.Fatalf("Failed to execute purge_expired_cache_keys(10000): %v", err)
 	}
 
-	ulidVal := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), rand.Reader)
+	uuidVal, err := googleuuid.NewV7()
+	if err != nil {
+		t.Fatalf("Failed to generate UUID v7: %v", err)
+	}
 
 	user := &model.UserData{
-		ID:        model.ID(ulidVal),
+		ID:        model.ID(uuidVal),
 		FirstName: "Optimized",
 		LastName:  "User",
 		BirthDate: 946684800,
@@ -94,7 +96,7 @@ func TestOptimizedRepository(t *testing.T) {
 	}
 
 	var retrieved model.UserData
-	found, err := repo.Get(ctx, model.ID(ulidVal), &retrieved)
+	found, err := repo.Get(ctx, model.ID(uuidVal), &retrieved)
 	if err != nil {
 		t.Fatalf("Optimized Get failed: %v", err)
 	}

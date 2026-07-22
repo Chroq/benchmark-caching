@@ -9,7 +9,7 @@ import (
 	"github.com/Chroq/benchmark-caching/internal/domain/service"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/httpsrv"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/memory"
-	oklogulid "github.com/oklog/ulid/v2"
+	googleuuid "github.com/google/uuid"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 )
@@ -23,7 +23,7 @@ func TestHandler_MemoryFlow(t *testing.T) {
 	defer useCase.Close()
 
 	keyID := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	ulidStr := oklogulid.ULID(keyID).String()
+	uuidStr := googleuuid.UUID(keyID).String()
 
 	handler := httpsrv.NewHandler("memory", [][16]byte{keyID}, useCase)
 
@@ -56,7 +56,7 @@ func TestHandler_MemoryFlow(t *testing.T) {
 	// 2. SET item
 	req.Reset()
 	resp.Reset()
-	req.SetRequestURI("http://localhost/memory/set?id=" + ulidStr)
+	req.SetRequestURI("http://localhost/memory/set?id=" + uuidStr)
 	req.Header.SetMethod("POST")
 	if err := client.Do(req, resp); err != nil {
 		t.Fatalf("Set request failed: %v", err)
@@ -68,7 +68,7 @@ func TestHandler_MemoryFlow(t *testing.T) {
 	// 3. GET item
 	req.Reset()
 	resp.Reset()
-	req.SetRequestURI("http://localhost/memory/get?id=" + ulidStr)
+	req.SetRequestURI("http://localhost/memory/get?id=" + uuidStr)
 	req.Header.SetMethod("GET")
 	if err := client.Do(req, resp); err != nil {
 		t.Fatalf("Get request failed: %v", err)
@@ -87,3 +87,4 @@ func TestHandler_MemoryFlow(t *testing.T) {
 		t.Errorf("expected FirstName Jean-Sébastien, got %s", fetched.FirstName)
 	}
 }
+

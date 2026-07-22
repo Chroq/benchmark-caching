@@ -9,7 +9,7 @@ import (
 	"github.com/Chroq/benchmark-caching/internal/config"
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/serializer"
-	oklogulid "github.com/oklog/ulid/v2"
+	googleuuid "github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -18,8 +18,8 @@ type Repository struct {
 	client *redis.Client
 }
 
-func ulidToString(id [16]byte) string {
-	return oklogulid.ULID(id).String()
+func uuidToString(id [16]byte) string {
+	return googleuuid.UUID(id).String()
 }
 
 // NewClient initializes a Valkey client pool with connection retry support.
@@ -67,9 +67,9 @@ func (r *Repository) Close() error {
 	return nil
 }
 
-// Get fetches a UserData using the ULID key into a destination struct.
+// Get fetches a UserData using the UUID v7 key into a destination struct.
 func (r *Repository) Get(ctx context.Context, id [16]byte, dest *model.UserData) (bool, error) {
-	keyStr := ulidToString(id)
+	keyStr := uuidToString(id)
 
 	val, err := r.client.Get(ctx, keyStr).Bytes()
 	if err != nil {
@@ -86,9 +86,9 @@ func (r *Repository) Get(ctx context.Context, id [16]byte, dest *model.UserData)
 	return true, nil
 }
 
-// Set stores a UserData using the ULID key.
+// Set stores a UserData using the UUID v7 key.
 func (r *Repository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
-	keyStr := ulidToString(user.ID)
+	keyStr := uuidToString(user.ID)
 
 	val, err := serializer.MarshalProtobuf(user)
 	if err != nil {

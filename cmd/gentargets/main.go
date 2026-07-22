@@ -2,19 +2,17 @@ package main
 
 import (
 	"bufio"
-	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
-	oklogulid "github.com/oklog/ulid/v2"
+	googleuuid "github.com/google/uuid"
 )
 
 func main() {
 	count := flag.Int("count", 100000, "Number of keys to generate")
-	outputKeys := flag.String("keys-file", "gen/keys.txt", "Output file for raw ULID keys")
+	outputKeys := flag.String("keys-file", "gen/keys.txt", "Output file for raw UUID v7 keys")
 	flag.Parse()
 
 	keysDir := filepath.Dir(*outputKeys)
@@ -22,8 +20,6 @@ func main() {
 		fmt.Printf("Failed to create keys directory: %v\n", err)
 		os.Exit(1)
 	}
-
-	entropy := oklogulid.Monotonic(rand.Reader, 0)
 
 	keysFile, err := os.Create(*outputKeys)
 	if err != nil {
@@ -35,10 +31,14 @@ func main() {
 	keysWriter := bufio.NewWriter(keysFile)
 
 	for i := 0; i < *count; i++ {
-		id := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), entropy)
+		id, err := googleuuid.NewV7()
+		if err != nil {
+			fmt.Printf("Failed to generate UUID v7: %v\n", err)
+			os.Exit(1)
+		}
 		keyStr := id.String()
 
-		_, err := fmt.Fprintf(keysWriter, "%s\n", keyStr)
+		_, err = fmt.Fprintf(keysWriter, "%s\n", keyStr)
 		if err != nil {
 			fmt.Printf("Failed to write key: %v\n", err)
 			os.Exit(1)
@@ -50,5 +50,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Successfully generated %d raw keys in %s\n", *count, *outputKeys)
+	fmt.Printf("Successfully generated %d raw UUID v7 keys in %s\n", *count, *outputKeys)
 }

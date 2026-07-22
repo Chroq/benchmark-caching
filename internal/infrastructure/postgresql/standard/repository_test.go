@@ -69,7 +69,10 @@ func TestStandardRepository(t *testing.T) {
 
 	repo := standard.NewRepository(pool)
 
-	uuidVal := googleuuid.New()
+	uuidVal, err := googleuuid.NewV7()
+	if err != nil {
+		t.Fatalf("Failed to generate UUID v7: %v", err)
+	}
 
 	user := &model.UserData{
 		ID:        model.ID(uuidVal),

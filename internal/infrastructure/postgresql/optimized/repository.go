@@ -39,7 +39,7 @@ func (r *OptimizedRepository) Close() error {
 	return nil
 }
 
-// Get retrieves a UserData by its 16-byte ULID by querying the unlogged cache_optimized table.
+// Get retrieves a UserData by its 16-byte UUID v7 by querying the unlogged cache_optimized table.
 func (r *OptimizedRepository) Get(ctx context.Context, id [16]byte, dest *model.UserData) (bool, error) {
 	var value []byte
 
@@ -63,7 +63,7 @@ func (r *OptimizedRepository) Get(ctx context.Context, id [16]byte, dest *model.
 	return true, nil
 }
 
-// Set stores a UserData serialized to Protobuf with a ULID key into the cache_optimized table.
+// Set stores a UserData serialized to Protobuf with a UUID v7 key into the cache_optimized table.
 func (r *OptimizedRepository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
 	if ttl <= 0 {
 		ttl = 8 * time.Hour

@@ -2,7 +2,6 @@ package valkey_test
 
 import (
 	"context"
-	"crypto/rand"
 	"os"
 	"testing"
 	"time"
@@ -10,7 +9,7 @@ import (
 	"github.com/Chroq/benchmark-caching/internal/config"
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
 	"github.com/Chroq/benchmark-caching/internal/infrastructure/valkey"
-	oklogulid "github.com/oklog/ulid/v2"
+	googleuuid "github.com/google/uuid"
 )
 
 func TestValkeyRepository(t *testing.T) {
@@ -34,7 +33,10 @@ func TestValkeyRepository(t *testing.T) {
 	repo := valkey.NewRepository(client)
 	defer repo.Close()
 
-	id := oklogulid.MustNew(oklogulid.Timestamp(time.Now()), rand.Reader)
+	id, err := googleuuid.NewV7()
+	if err != nil {
+		t.Fatalf("Failed to generate UUID v7: %v", err)
+	}
 	user := &model.UserData{
 		ID:        model.ID(id),
 		FirstName: "Valkey",
