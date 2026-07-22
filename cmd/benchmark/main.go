@@ -60,10 +60,14 @@ func main() {
 	handler := httpsrv.NewHandler(cfg.Engine, globalKeys, userUseCase)
 
 	server := &fasthttp.Server{
-		Handler:      handler.Handle,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Handler:                       handler.Handle,
+		ReadTimeout:                   5 * time.Second,
+		WriteTimeout:                  10 * time.Second,
+		IdleTimeout:                   120 * time.Second,
+		DisableHeaderNamesNormalizing: true,
+		NoDefaultServerHeader:         true,
+		NoDefaultContentType:          true,
+		Concurrency:                   256000,
 	}
 
 	// 6. Graceful Shutdown listener

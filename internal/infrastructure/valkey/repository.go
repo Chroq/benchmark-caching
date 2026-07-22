@@ -18,6 +18,10 @@ type Repository struct {
 	client *redis.Client
 }
 
+func ulidToString(id [16]byte) string {
+	return oklogulid.ULID(id).String()
+}
+
 // NewClient initializes a Valkey client pool with connection retry support.
 func NewClient(ctx context.Context, cfg *config.Config) (*redis.Client, error) {
 	slog.Info("Initializing Valkey Client Pool (PoolSize=2500)...")
@@ -25,8 +29,8 @@ func NewClient(ctx context.Context, cfg *config.Config) (*redis.Client, error) {
 		Addr:         cfg.ValkeyURL,
 		PoolSize:     2500,
 		MinIdleConns: 200,
-		ReadTimeout:  5 * time.Minute,
-		WriteTimeout: 5 * time.Minute,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
 	})
 
 	var pingErr error
@@ -65,7 +69,7 @@ func (r *Repository) Close() error {
 
 // Get fetches a UserData using the ULID key into a destination struct.
 func (r *Repository) Get(ctx context.Context, id [16]byte, dest *model.UserData) (bool, error) {
-	keyStr := oklogulid.ULID(id).String()
+	keyStr := ulidToString(id)
 
 	val, err := r.client.Get(ctx, keyStr).Bytes()
 	if err != nil {
@@ -84,7 +88,7 @@ func (r *Repository) Get(ctx context.Context, id [16]byte, dest *model.UserData)
 
 // Set stores a UserData using the ULID key.
 func (r *Repository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
-	keyStr := oklogulid.ULID(user.ID).String()
+	keyStr := ulidToString(user.ID)
 
 	val, err := serializer.MarshalProtobuf(user)
 	if err != nil {

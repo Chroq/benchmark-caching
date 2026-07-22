@@ -10,19 +10,19 @@ import (
 
 // Repository manages In-Memory caching using Otter.
 type Repository struct {
-	cache *otter.Cache[model.ID, *model.UserData]
+	cache *otter.Cache[model.ID, model.UserData]
 }
 
 // NewCache instantiates a configured Otter cache instance.
-func NewCache() *otter.Cache[model.ID, *model.UserData] {
-	return otter.Must(&otter.Options[model.ID, *model.UserData]{
+func NewCache() *otter.Cache[model.ID, model.UserData] {
+	return otter.Must(&otter.Options[model.ID, model.UserData]{
 		InitialCapacity:  150_000, // 100_000 + 50_000 to compensate for eviction
-		ExpiryCalculator: otter.ExpiryWriting[model.ID, *model.UserData](1 * time.Hour),
+		ExpiryCalculator: otter.ExpiryWriting[model.ID, model.UserData](8 * time.Hour),
 	})
 }
 
 // NewRepository creates a new in-memory repository instance with the injected Otter cache.
-func NewRepository(cache *otter.Cache[model.ID, *model.UserData]) *Repository {
+func NewRepository(cache *otter.Cache[model.ID, model.UserData]) *Repository {
 	if cache == nil {
 		cache = NewCache()
 	}
@@ -36,14 +36,13 @@ func (r *Repository) Get(ctx context.Context, id [16]byte, dest *model.UserData)
 	if !ok {
 		return false, nil
 	}
-	*dest = *val
+	*dest = val
 	return true, nil
 }
 
 func (r *Repository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
-	u := *user
-	r.cache.Set(user.ID, &u)
-	if ttl > 0 {
+	r.cache.Set(user.ID, *user)
+	if ttl > 0 && ttl != 8*time.Hour {
 		r.cache.SetExpiresAfter(user.ID, ttl)
 	}
 	return nil

@@ -47,6 +47,21 @@ func TestOptimizedRepository(t *testing.T) {
 		t.Fatalf("Failed to parse DATABASE_URL: %v", err)
 	}
 
+	config.AfterConnect = func(connectCtx context.Context, conn *pgx.Conn) error {
+		_, errOptGet := conn.Prepare(connectCtx, "get_user_optimized",
+			"SELECT value FROM cache_optimized WHERE key = $1 AND expires_at > $2")
+		_, errOptSet := conn.Prepare(connectCtx, "set_user_optimized",
+			"INSERT INTO cache_optimized (key, value, expires_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at")
+
+		if errOptGet != nil {
+			return errOptGet
+		}
+		if errOptSet != nil {
+			return errOptSet
+		}
+		return nil
+	}
+
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatalf("Failed to create pgxpool: %v", err)
@@ -73,7 +88,7 @@ func TestOptimizedRepository(t *testing.T) {
 		DeletedAt: 0,
 	}
 
-	err = repo.Set(ctx, user, 2*time.Hour)
+	err = repo.Set(ctx, user, 8*time.Hour)
 	if err != nil {
 		t.Fatalf("Optimized Set failed: %v", err)
 	}

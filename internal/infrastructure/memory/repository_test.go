@@ -23,7 +23,7 @@ func TestOtterRepository_GetSet(t *testing.T) {
 		Active:    true,
 	}
 
-	err := repo.Set(ctx, user, 1*time.Minute)
+	err := repo.Set(ctx, user, 8*time.Hour)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}

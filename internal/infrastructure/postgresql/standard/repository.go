@@ -44,10 +44,7 @@ func (r *StandardRepository) Close() error {
 
 // Get retrieves a UserData by its 16-byte UUID from the relational table users_standard.
 func (r *StandardRepository) Get(ctx context.Context, id [16]byte, dest *model.UserData) (bool, error) {
-	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	err := r.pool.QueryRow(dbCtx,
+	err := r.pool.QueryRow(ctx,
 		"get_user_standard",
 		id,
 	).Scan(
@@ -73,10 +70,7 @@ func (r *StandardRepository) Get(ctx context.Context, id [16]byte, dest *model.U
 
 // Set stores a UserData by writing directly to standard SQL columns.
 func (r *StandardRepository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
-	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	_, err := r.pool.Exec(dbCtx,
+	_, err := r.pool.Exec(ctx,
 		"set_user_standard",
 		user.ID,
 		user.FirstName,

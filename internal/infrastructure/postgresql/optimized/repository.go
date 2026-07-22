@@ -44,8 +44,9 @@ func (r *OptimizedRepository) Get(ctx context.Context, id [16]byte, dest *model.
 	var value []byte
 
 	err := r.pool.QueryRow(ctx,
-		"SELECT value FROM cache_optimized WHERE key = $1 AND expires_at > NOW()::timestamp",
+		"get_user_optimized",
 		id,
+		time.Now().UTC(),
 	).Scan(&value)
 
 	if err != nil {
@@ -65,7 +66,7 @@ func (r *OptimizedRepository) Get(ctx context.Context, id [16]byte, dest *model.
 // Set stores a UserData serialized to Protobuf with a ULID key into the cache_optimized table.
 func (r *OptimizedRepository) Set(ctx context.Context, user *model.UserData, ttl time.Duration) error {
 	if ttl <= 0 {
-		ttl = 2 * time.Hour
+		ttl = 8 * time.Hour
 	}
 	expiresAt := time.Now().UTC().Add(ttl)
 
@@ -74,12 +75,7 @@ func (r *OptimizedRepository) Set(ctx context.Context, user *model.UserData, ttl
 		return fmt.Errorf("optimized protobuf encode error: %w", err)
 	}
 
-	query := "INSERT INTO cache_optimized (key, value, expires_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at"
-
-	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	_, err = r.pool.Exec(dbCtx, query, user.ID, value, expiresAt)
+	_, err = r.pool.Exec(ctx, "set_user_optimized", user.ID, value, expiresAt)
 	if err != nil {
 		return fmt.Errorf("optimized set db error: %w", err)
 	}

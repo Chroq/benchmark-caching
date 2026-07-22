@@ -3,7 +3,7 @@ package httpsrv
 import (
 	crand "crypto/rand"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"math/rand"
 	"sync"
 	"time"
@@ -15,7 +15,9 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// Global sync.Pool to recycle UserData structures and eliminate allocation overhead on reads.
+var errInvalidID = errors.New("invalid ID format")
+
+// Global sync.Pool to recycle UserData structures and eliminate allocation overhead on reads/writes.
 var userDataPool = sync.Pool{
 	New: func() any {
 		return &model.UserData{}
@@ -55,12 +57,9 @@ func NewHandler(
 
 // Handle implements the ultra-fast direct switch-based router on top of fasthttp.
 func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
-	path := ctx.Path()
-	method := ctx.Method()
-
-	switch string(path) {
+	switch string(ctx.Path()) {
 	case "/health":
-		if string(method) == "GET" {
+		if ctx.IsGet() {
 			ctx.SetStatusCode(fasthttp.StatusOK)
 			ctx.SetBodyString(`{"status":"OK"}`)
 		} else {
@@ -68,14 +67,14 @@ func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
 		}
 
 	case "/memory/get", "/valkey/get", "/postgres/get":
-		if string(method) == "GET" {
+		if ctx.IsGet() {
 			h.HandleGet(ctx)
 		} else {
 			ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
 		}
 
 	case "/memory/set", "/valkey/set", "/postgres/set":
-		if string(method) == "POST" {
+		if ctx.IsPost() {
 			h.HandleSet(ctx)
 		} else {
 			ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
@@ -89,29 +88,28 @@ func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
 func (h *Handler) getKeyFromRequest(ctx *fasthttp.RequestCtx) ([16]byte, error) {
 	idParam := ctx.QueryArgs().Peek("id")
 	if len(idParam) == 26 {
-		if parsed, err := oklogulid.Parse(string(idParam)); err == nil {
+		var parsed oklogulid.ULID
+		if err := parsed.UnmarshalText(idParam); err == nil {
 			return parsed, nil
 		}
 	} else if len(idParam) == 36 {
-		if parsed, err := googleuuid.Parse(string(idParam)); err == nil {
+		if parsed, err := googleuuid.ParseBytes(idParam); err == nil {
 			return parsed, nil
 		}
 	}
-	return [16]byte{}, fmt.Errorf("invalid ID format")
+	return [16]byte{}, errInvalidID
 }
 
-func generateDummyUser(id [16]byte) *model.UserData {
+func populateDummyUser(id [16]byte, user *model.UserData) {
 	now := time.Now().Unix()
-	return &model.UserData{
-		ID:        id,
-		FirstName: "Jean-Sébastien",
-		LastName:  "Bach",
-		BirthDate: -6468729600,
-		Active:    true,
-		CreatedAt: now,
-		UpdatedAt: now,
-		DeletedAt: 0,
-	}
+	user.ID = id
+	user.FirstName = "Jean-Sébastien"
+	user.LastName = "Bach"
+	user.BirthDate = -6468729600
+	user.Active = true
+	user.CreatedAt = now
+	user.UpdatedAt = now
+	user.DeletedAt = 0
 }
 
 // HandleGet executes the GET use case for the benchmark entry.
@@ -149,9 +147,16 @@ func (h *Handler) HandleSet(ctx *fasthttp.RequestCtx) {
 		ctx.SetStatusCode(fasthttp.StatusBadRequest)
 		return
 	}
-	user := generateDummyUser(key)
 
-	if err := h.useCase.SetUser(ctx, user, 5*time.Minute); err != nil {
+	user := userDataPool.Get().(*model.UserData)
+	defer func() {
+		user.Reset()
+		userDataPool.Put(user)
+	}()
+
+	populateDummyUser(key, user)
+
+	if err := h.useCase.SetUser(ctx, user, 8*time.Hour); err != nil {
 		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
 		return
 	}

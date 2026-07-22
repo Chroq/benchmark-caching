@@ -82,7 +82,7 @@ func TestStandardRepository(t *testing.T) {
 		DeletedAt: 0,
 	}
 
-	err = repo.Set(ctx, user, 10*time.Minute)
+	err = repo.Set(ctx, user, 8*time.Hour)
 	if err != nil {
 		t.Fatalf("Standard Set failed: %v", err)
 	}

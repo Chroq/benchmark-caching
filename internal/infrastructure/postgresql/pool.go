@@ -71,17 +71,22 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("failed to parse DATABASE_URL: %w", err)
 	}
 
-	goMaxProcsStr := os.Getenv("GOMAXPROCS")
-	if goMaxProcsStr == "" {
-		goMaxProcsStr = "4"
+	maxConns := int32(cfg.DatabaseMaxConns)
+	if maxConns <= 0 {
+		goMaxProcsStr := os.Getenv("GOMAXPROCS")
+		if goMaxProcsStr == "" {
+			goMaxProcsStr = "4"
+		}
+		goMaxProcs, err := strconv.Atoi(goMaxProcsStr)
+		if err != nil {
+			slog.Error("failed to parse GOMAXPROCS, using default", "error", err)
+			goMaxProcs = 4
+		}
+		maxConns = int32((goMaxProcs * 2) + 1)
 	}
-	goMaxProcs, err := strconv.Atoi(goMaxProcsStr)
-	if err != nil {
-		slog.Error("failed to parse GOMAXPROCS, using default", "error", err)
-		goMaxProcs = 4
-	}
-	pgConfig.MaxConns = int32((goMaxProcs * 2) + 1)
-	pgConfig.MinConns = int32((goMaxProcs * 2) + 1)
+
+	pgConfig.MaxConns = maxConns
+	pgConfig.MinConns = maxConns
 	pgConfig.MaxConnIdleTime = 30 * time.Minute
 	pgConfig.MaxConnLifetime = 5 * time.Minute
 
@@ -97,6 +102,21 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 			}
 			if errStdSet != nil {
 				return errStdSet
+			}
+			return nil
+		}
+	} else if cfg.Engine == "optimized-postgresql" {
+		pgConfig.AfterConnect = func(connectCtx context.Context, conn *pgx.Conn) error {
+			_, errOptGet := conn.Prepare(connectCtx, "get_user_optimized",
+				"SELECT value FROM cache_optimized WHERE key = $1 AND expires_at > $2")
+			_, errOptSet := conn.Prepare(connectCtx, "set_user_optimized",
+				"INSERT INTO cache_optimized (key, value, expires_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at")
+
+			if errOptGet != nil {
+				return errOptGet
+			}
+			if errOptSet != nil {
+				return errOptSet
 			}
 			return nil
 		}
