@@ -175,7 +175,7 @@ define run_bench
 	@echo "========================================================"
 	@$(MAKE) tune-os
 	$(call manage_services,$(1))
-	@if [ "$(1)" = "postgres-tsid" ] || [ "$(1)" = "standard-postgresql-tsid" ]; then \
+	@if [ "$(1)" = "postgres-tsid" ]; then \
 		echo "Generating 100k TSID keys in gen/keys.txt..." ; \
 		mkdir -p gen ; \
 		go run ./cmd/gentargets -count=100000 -keys-file=gen/keys.txt -tsid ; \

@@ -33,4 +33,7 @@ var PopulateStandardTable = standard.PopulateStandardTable
 // PopulateTSIDTable delegates population to the tsid subpackage.
 var PopulateTSIDTable = tsidrepo.PopulateTSIDTable
 
+// CleanOptimizedTable delegates truncation to the optimized subpackage.
+var CleanOptimizedTable = optimized.CleanOptimizedTable
+
 

@@ -27,10 +27,10 @@ var userDataPool = sync.Pool{
 
 // Handler handles benchmark HTTP requests using fasthttp.
 type Handler struct {
+	useCase    input.UserUseCase
+	prngPool   *sync.Pool
 	engine     string
 	globalKeys [][16]byte
-	prngPool   *sync.Pool
-	useCase    input.UserUseCase
 }
 
 // NewHandler creates a wired HTTP benchmark handler using the driving UserUseCase.

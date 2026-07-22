@@ -36,7 +36,7 @@ func RunMigrations(ctx context.Context, databaseURL string, engine string) error
 	switch engine {
 	case "standard-postgresql":
 		schemaFile = "internal/infrastructure/postgresql/standard/schema.sql"
-	case "postgres-tsid", "standard-postgresql-tsid":
+	case "postgres-tsid":
 		schemaFile = "internal/infrastructure/postgresql/tsid/schema.sql"
 	}
 
@@ -109,7 +109,7 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 			}
 			return nil
 		}
-	case "postgres-tsid", "standard-postgresql-tsid":
+	case "postgres-tsid":
 		pgConfig.AfterConnect = func(connectCtx context.Context, conn *pgx.Conn) error {
 			_, errTsidGet := conn.Prepare(connectCtx, "get_user_tsid",
 				"SELECT id, first_name, last_name, birth_date, active, created_at, updated_at, deleted_at FROM users_tsid WHERE id = $1")

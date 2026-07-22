@@ -11,8 +11,8 @@ type Config struct {
 	LogLevel         string
 	Port             string
 	DatabaseURL      string
-	DatabaseMaxConns int
 	ValkeyURL        string
+	DatabaseMaxConns int
 }
 
 // LoadConfig parses command line flags and environment variables into Config.

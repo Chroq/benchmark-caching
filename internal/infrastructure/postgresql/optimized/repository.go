@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Chroq/benchmark-caching/internal/domain/model"
@@ -17,6 +18,16 @@ import (
 // OptimizedRepository implements unlogged partitioned key-value cache storage with Protobuf values.
 type OptimizedRepository struct {
 	pool *pgxpool.Pool
+}
+
+// CleanOptimizedTable truncates the unlogged cache_optimized table during setup.
+func CleanOptimizedTable(ctx context.Context, pool *pgxpool.Pool) error {
+	slog.Info("Truncating cache_optimized table...")
+	_, err := pool.Exec(ctx, "TRUNCATE TABLE cache_optimized")
+	if err != nil {
+		return fmt.Errorf("failed to truncate cache_optimized: %w", err)
+	}
+	return nil
 }
 
 // NewRepository creates a new optimized PostgreSQL repository.

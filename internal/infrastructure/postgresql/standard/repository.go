@@ -88,10 +88,11 @@ func (r *StandardRepository) Set(ctx context.Context, user *model.UserData, ttl 
 
 type standardStreamSource struct {
 	globalKeys [][16]byte
+	rowValues  []any
 	totalCount int
 	index      int
-	rowValues  []any
-	now        int64
+	startTime  int64
+	timeSpan   int64
 }
 
 func (s *standardStreamSource) Next() bool {
@@ -109,13 +110,20 @@ func (s *standardStreamSource) Next() bool {
 		id = uuidVal
 	}
 
+	var createdAt int64
+	if s.totalCount > 1 {
+		createdAt = s.startTime + (int64(s.index) * s.timeSpan / int64(s.totalCount))
+	} else {
+		createdAt = s.startTime
+	}
+
 	s.rowValues[0] = id
 	s.rowValues[1] = "Jean-Sébastien"
 	s.rowValues[2] = "Bach"
 	s.rowValues[3] = int64(-6468729600)
-	s.rowValues[4] = true
-	s.rowValues[5] = s.now
-	s.rowValues[6] = s.now
+	s.rowValues[4] = false
+	s.rowValues[5] = createdAt
+	s.rowValues[6] = createdAt
 	s.rowValues[7] = int64(0)
 
 	s.index++
@@ -132,6 +140,14 @@ func (s *standardStreamSource) Err() error {
 
 // PopulateStandardTable populates users_standard with totalCount background records using high-performance CopyFrom.
 func PopulateStandardTable(ctx context.Context, pool *pgxpool.Pool, globalKeys [][16]byte, totalCount int) error {
+	slog.Info("Cleaning up previous benchmark test records (active = true)...")
+	tag, err := pool.Exec(ctx, "DELETE FROM users_standard WHERE active = true")
+	if err != nil {
+		slog.Warn("Failed to cleanup active test records from users_standard", "error", err)
+	} else if tag.RowsAffected() > 0 {
+		slog.Info("Cleaned up previous test records from users_standard", "deletedCount", tag.RowsAffected())
+	}
+
 	var count int64
 	_ = pool.QueryRow(ctx, "SELECT count(*) FROM (SELECT 1 FROM users_standard LIMIT $1) t", totalCount).Scan(&count)
 	if count >= int64(totalCount) {
@@ -141,17 +157,20 @@ func PopulateStandardTable(ctx context.Context, pool *pgxpool.Pool, globalKeys [
 
 	slog.Info("Populating users_standard with background records for realistic sizing...", "target", totalCount, "current", count)
 
+	now := time.Now().Unix()
+	fiveYearsAgo := now - (5 * 365 * 86400)
 	source := &standardStreamSource{
 		globalKeys: globalKeys,
 		totalCount: totalCount,
 		rowValues:  make([]any, 8),
-		now:        time.Now().Unix(),
+		startTime:  fiveYearsAgo,
+		timeSpan:   now - fiveYearsAgo,
 	}
 
-	popCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	popCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	_, err := pool.CopyFrom(
+	_, err = pool.CopyFrom(
 		popCtx,
 		pgx.Identifier{"users_standard"},
 		[]string{"id", "first_name", "last_name", "birth_date", "active", "created_at", "updated_at", "deleted_at"},

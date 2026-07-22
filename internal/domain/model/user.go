@@ -4,14 +4,14 @@ type ID [16]byte
 
 // UserData represents the domain cache entry entity.
 type UserData struct {
-	ID        ID     // 16-byte raw UUID v7 (RFC 9562)
-	FirstName string // Dynamic length string
-	LastName  string // Dynamic length string
-	BirthDate int64  // Unix Timestamp
-	Active    bool   // Boolean
-	CreatedAt int64  // Unix Timestamp
-	UpdatedAt int64  // Unix Timestamp
-	DeletedAt int64  // Unix Timestamp
+	FirstName string
+	LastName  string
+	BirthDate int64
+	CreatedAt int64
+	UpdatedAt int64
+	DeletedAt int64
+	ID        ID
+	Active    bool
 }
 
 func (u *UserData) Reset() {

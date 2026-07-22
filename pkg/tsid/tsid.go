@@ -16,7 +16,12 @@ var counter uint64
 // High 42 bits: timestamp in ms since custom epoch.
 // Low 22 bits: sequence counter & random bits.
 func New() int64 {
-	ms := time.Now().UnixMilli() - Epoch
+	return NewFromTimeMs(time.Now().UnixMilli())
+}
+
+// NewFromTimeMs generates a TSID using the provided timestamp in milliseconds since Unix epoch.
+func NewFromTimeMs(unixMs int64) int64 {
+	ms := unixMs - Epoch
 	if ms < 0 {
 		ms = 0
 	}
