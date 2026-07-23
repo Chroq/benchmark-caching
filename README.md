@@ -487,7 +487,7 @@ Based on empirical benchmark data, engineering complexity, energy efficiency, an
 
 ---
 
-### 📌 Multi-Dimensional Decision Matrix
+### 2. Multi-Dimensional Decision Matrix
 
 | Evaluation Dimension             |                                Typology A: Local In-Memory (`Otter`)                                 |           Typology B: Distributed Store (`Valkey 9.1`)            | Typology C: Postgres UNLOGGED Cache (`optimized-postgresql`) | Typology D: Direct DB / No Cache (`standard-postgresql` / `postgres-tsid`) |
 | :------------------------------- | :--------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------: | :----------------------------------------------------------: | :------------------------------------------------------------------------: |
@@ -502,7 +502,7 @@ Based on empirical benchmark data, engineering complexity, energy efficiency, an
 | **Memory Overflow Behavior**     |                                            App RAM bound                                             |                    RAM bound _(LRU eviction)_                     | Hybrid _(RAM `shared_buffers` + transparent disk overflow)_  |        Hybrid _(RAM `shared_buffers` + transparent disk overflow)_         |
 | **Architectural Verdict**        |                             **Best for L1 local cache & static config**                              |           **Best for shared sessions & >75k+ RPS SLAs**           |      **Best for high-volume cache on single DB stack**       |      **Best default for <2.5k write RPS (Prevents over-engineering)**      |
 
-### 💡 Primary Key Trade-Off: UUID v7 vs. TSID (`bigint`)
+### 3. Primary Key Trade-Off: Native UUID v7 vs. TSID (`bigint`)
 
 > [!NOTE]
 > **Empirical Key Takeaway: Standardize on Native UUID v7**
@@ -518,9 +518,9 @@ Based on empirical benchmark data, engineering complexity, energy efficiency, an
 >
 > **Conclusion:** Because TSID's compact 8-byte footprint yields no tangible throughput or latency advantage in PostgreSQL, **UUID v7 is the superior architectural choice** due to its native ergonomics, ecosystem integration, and robust distributed collision safety.
 
-
 ---
 
 ## 📄 License
 
 This repository is distributed under the MIT License. See `LICENSE` for details.
+
