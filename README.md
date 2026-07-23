@@ -18,7 +18,7 @@ To answer this, we measure throughput (MB/s), request execution rates (RPS), and
 
 ## 🏗️ Architecture & Evaluated Engines
 
-The benchmark runner executes an ultra-low-allocation HTTP service written in Go (`fasthttp`), exposing standardized GET/SET endpoints across four storage backends:
+The benchmark runner executes an ultra-low-allocation HTTP service written in Go (`fasthttp`), exposing standardized GET/SET endpoints across five storage backends:
 
 ```
                       +----------------------------------+
@@ -31,6 +31,7 @@ The benchmark runner executes an ultra-low-allocation HTTP service written in Go
                       |    (Zero-Alloc Buffer Recycling) |
                       +----------------------------------+
                                        |
+<<<<<<< HEAD
      +-------------------+-------------+-------------+-------------------+
      |                   |                           |                   |
      v                   v                           v                   v
@@ -38,6 +39,15 @@ The benchmark runner executes an ultra-low-allocation HTTP service written in Go
 |  Otter   |   |   Valkey 9.1      |   | Standard Postgres  |   | Optimized Postgres |
 | (Memory) |   | (Protobuf VTProto)|   | (Relational / UUID)|   | (UNLOGGED / VTProto|
 +----------+   +-------------------+   +--------------------+   +--------------------+
+=======
+     +------------+----------+---------+---------+-------------------+
+     |            |          |                   |                   |
+     v            v          v                   v                   v
++----------+ +---------+ +--------------------+ +--------------------+ +--------------------+
+|  Otter   | | Valkey  | | Standard Postgres  | | Optimized Postgres | |   Postgres TSID    |
+| (Memory) | |  (9.1)  | |(Relational/UUIDv7) | |(UNLOGGED/VTProto)  | | (64-bit TSID Key)  |
++----------+ +---------+ +--------------------+ +--------------------+ +--------------------+
+>>>>>>> 14d5f03 (docs: update README with 10M rows benchmark results, engine tuning criteria, and postgres-tsid)
 ```
 
 ### Evaluated Configurations
@@ -52,13 +62,17 @@ The benchmark runner executes an ultra-low-allocation HTTP service written in Go
    - **Indexing:** 26-character Base32 Crockford ULIDs backed by `github.com/oklog/ulid/v2`.
 
 3. **Standard PostgreSQL (`Relational / Flat`)**
-   - **Mechanism:** Standard relational table (`users_standard`) with individual columns per field.
+   - **Mechanism:** Standard relational table (`users_standard`) with individual columns per field, pre-populated with **10,000,000 background rows** (~1.3 GB of data) to evaluate query latency against a production-scale relational table.
    - **Queries:** Prepared statements executed at the connection layer (`pgxpool`) to eliminate SQL parsing overhead.
    - **Indexing:** Binary UUID primary key (`UUID` / 16 bytes).
 
 4. **Optimized PostgreSQL (`UNLOGGED / Protobuf VTProto`)**
-   - **Mechanism:** Dedicated key-value cache architecture leveraging advanced PostgreSQL internals designed for transient workloads.
-   - **Payload Format:** Protobuf VTProto zero-allocation byte payload stored in a bytea column.
+   - **Mechanism:** Dedicated key-value cache architecture (`cache_optimized` unlogged table). Designed for transient workloads, it operates as a dedicated cache store holding the active working set (100,000 seeded keys).
+   - **Payload Format:** Protobuf VTProto zero-allocation byte payload stored in a compact `bytea` column.
+   - **Kernel Optimizations:** Disables Write-Ahead Logging (`UNLOGGED`), reserves page space for HOT updates (`fillfactor = 70`), and executes non-blocking background cleanup (`FOR UPDATE SKIP LOCKED`).
+
+5. **PostgreSQL TSID (`Relational / 64-bit TSID`)**
+   - **Mechanism:** Relational table schema (`users_tsid`) leveraging 64-bit Time-Sorted Identifiers (TSID) stored as native 8-byte `bigint` primary keys, pre-populated with **10,000,000 background rows** (~1.3 GB of data) for compact B-Tree index traversal.
 
 ---
 
@@ -71,20 +85,73 @@ Instead of Go's reflection-heavy standard `proto.Marshal` or `json.Marshal`, all
 - **Zero Heap Allocations:** Encodes (`MarshalVT`) and decodes (`UnmarshalVT`) binary payloads without runtime reflection or dynamic struct allocations.
 - **Wire Format Compatibility:** Fully compatible with standard Protobuf v3 specifications.
 
-### 2. PostgreSQL Engine Tuning Strategies
+---
 
-The `Optimized PostgreSQL` configuration incorporates several database kernel optimizations:
+### 2. PostgreSQL Engine Tuning Strategies (`postgresql.conf`)
 
+<<<<<<< HEAD
 - **`UNLOGGED` Tables:** Disables Write-Ahead Logging (WAL). Eliminates disk I/O bottlenecks during cache mutations (`SET`), enabling near-in-memory write speeds.
 - **HOT (Heap-Only Tuple) Optimization (`fillfactor = 70`):** Reserves 30% page space on table blocks to allow in-place tuple updates. Reduces B-Tree index maintenance and prevents index bloat during frequent row overwrites.
 - **Non-Blocking Asynchronous Purge (`FOR UPDATE SKIP LOCKED`):** Expired cache items are purged in background batches via PL/pgSQL (`purge_expired_cache_keys()`) using non-blocking row locks. Ensures active `GET` requests never block on garbage collection.
 - **16-Byte Compact Binary Keys:** Keys are stored as native 16-byte binary UUIDs/ULIDs, maintaining a minimal B-Tree index footprint that fits completely inside PostgreSQL `shared_buffers`.
+=======
+PostgreSQL is engineered by default for strict ACID data durability. To maximize throughput and minimize latency for caching workloads, RAM allocations and Write-Ahead Log (WAL) behaviors must be tuned (`postgresql.conf` or `ALTER SYSTEM SET ...`):
+>>>>>>> 14d5f03 (docs: update README with 10M rows benchmark results, engine tuning criteria, and postgres-tsid)
 
-### 3. Application Layer & Runtime Optimization
+#### A. Memory Allocation (RAM Optimization)
+
+- **`shared_buffers = 25%` of Total System RAM** _(e.g., 1GB on a 4GB system, 4GB on 16GB RAM)_: Primary shared memory cache where PostgreSQL buffers table pages and B-Tree index blocks read from disk.
+- **`work_mem = 16MB` to `64MB`**: Memory allocated for sorting operations (`ORDER BY`, `DISTINCT`, `JOIN`). Allocated per query operation per connection; tuned to prevent Linux Kernel OOM invocation under high concurrent connection pools.
+- **`effective_cache_size = 50%` to `75%` of Total System RAM**: Estimate provided to the query planner representing available RAM (PostgreSQL shared buffers + Linux OS page cache), encouraging high-performance B-Tree index scans.
+- **`maintenance_work_mem = 256MB` to `1GB`**: Accelerates index creation (`CREATE INDEX`), table maintenance (`VACUUM`), and bulk foreign key validations.
+
+#### B. Checkpoints & WAL Tuning (High-Throughput SET Performance)
+
+- **`max_wal_size = 4GB` to `16GB`** _(increased from default 1GB)_: Expands WAL log capacity before triggering forced checkpoints, eliminating disk I/O contention during sustained write spikes.
+- **`checkpoint_completion_target = 0.9`**: Spreads checkpoint disk writes over 90% of the checkpoint duration window, preventing latency spikes.
+- **`wal_buffers = 16MB`**: Memory buffer allocation for unwritten WAL data prior to disk flushing.
+
+#### C. Transient Cache Architecture (`UNLOGGED` & HOT Updates)
+
+- **`UNLOGGED` Tables:** Disables Write-Ahead Logging (WAL) for transient cache items, achieving near-in-memory write speeds.
+- **HOT (Heap-Only Tuple) Optimization (`fillfactor = 70`):** Reserves 30% page space on table blocks to allow in-place tuple updates, eliminating B-Tree index rewrite overhead during frequent key overwrites.
+- **Non-Blocking Asynchronous Purge (`FOR UPDATE SKIP LOCKED`):** Expired cache items are purged in background batches via PL/pgSQL using non-blocking row locks, preventing `GET` requests from blocking during garbage collection.
+- **Compact Keys:** 16-byte binary UUID v7 and 8-byte TSID keys keep index sizes small enough to fit within `shared_buffers`.
+
+---
+
+### 3. Valkey Engine Tuning Strategies (`valkey.conf`)
+
+Valkey/Redis executes on a single primary event-loop thread for core data manipulations. Performance bottlenecks stem from single-core CPU execution and network I/O bandwidth. The following configurations optimize Valkey as an in-memory cache:
+
+#### A. Memory Management & Eviction Policy
+
+- **`maxmemory = 75%` of Server RAM** _(e.g., `maxmemory 3gb` on a 4GB server)_: Sets a strict memory limit to prevent Linux Kernel OOM killer termination.
+- **`maxmemory-policy = allkeys-lru` or `volatile-lru`**: Automatically evicts Least Recently Used (LRU) keys when memory limit is reached to accommodate new cache insertions.
+
+#### B. Network I/O Threading (`io-threads`)
+
+- **`io-threads = 2` or `4`**: Offloads RESP protocol parsing and socket write operations to secondary worker threads (e.g., 2-3 threads on a 4-vCPU system), freeing the primary thread exclusively for in-memory key execution.
+- **`io-threads-do-reads = yes`**: Enables multi-threaded network reading and payload parsing for incoming request sockets.
+
+#### C. Disk Persistence Offloading (Pure In-Memory Cache)
+
+When operating exclusively as a transient application cache:
+
+- **`save ""`**: Disables background RDB disk snapshots.
+- **`appendonly no`**: Disables Append-Only File (AOF) logging to save CPU cycles and eliminate disk I/O latency.
+
+---
+
+### 4. Application Layer & Runtime Optimization
 
 - **`fasthttp` Core:** Replaces standard `net/http` with high-performance byte-slice parsing.
 - **Struct Pooling:** Recycles `model.UserData` domain entities via `sync.Pool` during deserialization, eliminating Garbage Collector overhead under heavy GET loads.
+<<<<<<< HEAD
 - **Standardized Identifier Libraries:** Leverages `github.com/oklog/ulid/v2` for monotonic ULID generation and `github.com/google/uuid` for standard UUID operations.
+=======
+- **Standardized Identifier Libraries:** Leverages `github.com/google/uuid` for monotonic UUID v7 (RFC 9562) generation and TSID 64-bit identifiers.
+>>>>>>> 14d5f03 (docs: update README with 10M rows benchmark results, engine tuning criteria, and postgres-tsid)
 
 ---
 
@@ -180,12 +247,177 @@ To run a specific engine manually for profiling or debugging:
 | **Valkey**             | `GET /valkey/get?id=<KEY>`   | `POST /valkey/set?id=<KEY>`   |
 | **Standard Postgres**  | `GET /postgres/get?id=<KEY>` | `POST /postgres/set?id=<KEY>` |
 | **Optimized Postgres** | `GET /postgres/get?id=<KEY>` | `POST /postgres/set?id=<KEY>` |
+| **Postgres TSID**      | `GET /postgres/get?id=<KEY>` | `POST /postgres/set?id=<KEY>` |
 
 ---
 
 ## 📊 Benchmark Results
 
-> ℹ️ _Official endurance results (10-minute continuous load suite) will be added here upon completion of the benchmark execution._
+> [!IMPORTANT]
+> **Dataset Footprint & Benchmark Isolation Context:**
+>
+> - **Relational Baselines (`standard-postgresql` & `postgres-tsid`):** Evaluated against relational tables pre-populated with **10,000,000 background rows (~1.3 GB of data)** to measure B-Tree index traversal, memory page cache behavior, and lookup latency against a large enterprise relational table footprint.
+> - **Dedicated Cache Engines (`memory`, `valkey`, `optimized-postgresql`):** Evaluated as dedicated key-value cache stores initialized with the active **100,000 key working set**.
+
+### 1. GET Read Endurance Benchmark (10 Minutes / 600s Continuous Load)
+
+_Evaluates read throughput and latency distribution under heavy concurrent load (250 workers)._
+
+| Engine                 | Storage Paradigm            |    Dataset Size    | Total Requests |   Throughput (RPS)   | Mean Latency | p50 Latency | p90 Latency | p95 Latency | p99 Latency | Max Latency | Success |
+| :--------------------- | :-------------------------- | :----------------: | :------------: | :------------------: | :----------: | :---------: | :---------: | :---------: | :---------: | :---------: | :-----: |
+| **In-Memory (Otter)**  | Native Go Cache             |     100k keys      |   63,995,364   | **106,658.98 req/s** |   1.959ms    |   1.482ms   |   4.415ms   |   5.287ms   |   7.687ms   |  26.758ms   | 100.00% |
+| **Valkey 9.1**         | Standalone KV Store         |     100k keys      |   46,273,423   | **77,122.39 req/s**  |   2.955ms    |   2.800ms   |   4.749ms   |   5.396ms   |   6.782ms   |  30.598ms   | 100.00% |
+| **Postgres TSID**      | Relational DB (64-bit TSID) | 10M rows (~1.3 GB) |   32,395,151   | **53,991.93 req/s**  |   4.321ms    |   4.202ms   |   6.242ms   |   7.096ms   |   9.236ms   |  33.767ms   | 100.00% |
+| **Optimized Postgres** | UNLOGGED Cache Table        |     100k keys      |   32,249,699   | **53,749.43 req/s**  |   4.338ms    |   4.226ms   |   6.274ms   |   7.133ms   |   9.237ms   |  47.219ms   | 100.00% |
+| **Standard Postgres**  | Relational DB (UUID v7)     | 10M rows (~1.3 GB) |   31,991,527   | **53,319.26 req/s**  |   4.382ms    |   4.317ms   |   6.226ms   |   6.974ms   |   8.585ms   |  39.832ms   | 100.00% |
+
+### 2. SET Write Benchmark (Seeding 100,000 Keys)
+
+_Measures key insertion throughput and write latency required to populate 100k keys._
+
+| Engine                 | Total Requests |     Rate (RPS)      | Duration | Mean Latency | p50 Latency | p90 Latency | p95 Latency | p99 Latency | Max Latency | Success |
+| :--------------------- | :------------: | :-----------------: | :------: | :----------: | :---------: | :---------: | :---------: | :---------: | :---------: | :-----: |
+| **In-Memory (Otter)**  |    100,011     | **94,029.10 req/s** |  1.065s  |   2.124ms    |   1.667ms   |   4.617ms   |   5.627ms   |   8.420ms   |  22.864ms   | 99.99%  |
+| **Valkey 9.1**         |    100,122     | **68,980.18 req/s** |  1.452s  |   3.289ms    |   3.025ms   |   5.082ms   |   5.822ms   |   7.840ms   |  52.463ms   | 99.88%  |
+| **Optimized Postgres** |    100,013     | **29,405.72 req/s** |  3.406s  |   8.415ms    |   6.384ms   |   8.152ms   |  30.372ms   |  32.468ms   |  35.232ms   | 99.99%  |
+| **Standard Postgres**  |    100,001     | **2,754.07 req/s**  | 36.397s  |   90.831ms   |  89.224ms   |  93.973ms   |  95.787ms   |  173.848ms  |  727.267ms  | 100.00% |
+| **Postgres TSID**      |    100,003     | **2,672.79 req/s**  | 37.506s  |   93.600ms   |  89.796ms   |  95.459ms   |  101.944ms  |  253.804ms  |  938.118ms  | 100.00% |
+
+### 💡 Key Takeaways & Performance Insights
+
+1. **Read Scale Efficiency on a 10M Row (~1.3 GB) Dataset:**
+   - Even when querying relational tables scaled to **10,000,000 rows (~1.3 GB)** (`standard-postgresql` and `postgres-tsid`), PostgreSQL maintains **~53,300 - 54,000 req/s** with a p50 latency of **4.2ms**.
+   - PostgreSQL achieves **70% of dedicated Valkey/Redis read throughput** (54k vs 77k RPS) under heavy concurrent load, demonstrating that PostgreSQL B-Tree index traversal remains fast even at scale.
+
+2. **10.6x Write Acceleration via UNLOGGED Tables & Protobuf:**
+   - **Optimized PostgreSQL** (`UNLOGGED` + `fillfactor=70` + Protobuf VTProto bytea payload) achieves **29,405.72 req/s** on SET operations (3.4s duration for 100k keys), compared to **2,754.07 req/s** for Standard PostgreSQL (36.4s duration).
+   - Eliminating WAL disk synchronization overhead yields a **10.6x performance gain** for cache write operations.
+
+<details>
+<summary><b>🔍 Click to view Raw Cleaned Benchmark Output Log</b></summary>
+
+```text
+========================================================
+CLEANED BENCHMARK RESULTS
+========================================================
+
+========================================================
+ENGINE: memory
+========================================================
+Successfully generated 100000 raw UUID v7 keys in gen/keys.txt
+
+--- Executing SET benchmark (Seeding 100k keys)... ---
+Requests      [total, rate, throughput]         100011, 94029.10, 93917.43
+Duration      [total, attack, wait]             1.065s, 1.064s, 1.148ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  120ns, 2.124ms, 1.667ms, 4.617ms, 5.627ms, 8.42ms, 22.864ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           99.99%
+Status Codes  [code:count]                      0:11  200:100000
+
+--- Executing GET benchmark with Vegeta (600s)... ---
+Requests      [total, rate, throughput]         63995364, 106658.98, 106658.43
+Duration      [total, attack, wait]             10m0s, 10m0s, 3.07ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  31.86µs, 1.959ms, 1.482ms, 4.415ms, 5.287ms, 7.687ms, 26.758ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:63995364
+
+========================================================
+ENGINE: valkey
+========================================================
+Successfully generated 100000 raw UUID v7 keys in gen/keys.txt
+
+--- Executing SET benchmark (Seeding 100k keys)... ---
+Requests      [total, rate, throughput]         100122, 68980.18, 68871.16
+Duration      [total, attack, wait]             1.452s, 1.451s, 526.102µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  110ns, 3.289ms, 3.025ms, 5.082ms, 5.822ms, 7.84ms, 52.463ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           99.88%
+Status Codes  [code:count]                      0:122  200:100000
+
+--- Executing GET benchmark with Vegeta (600s)... ---
+Requests      [total, rate, throughput]         46273423, 77122.39, 77122.12
+Duration      [total, attack, wait]             10m0s, 10m0s, 2.077ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  69.701µs, 2.955ms, 2.8ms, 4.749ms, 5.396ms, 6.782ms, 30.598ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:46273423
+
+========================================================
+ENGINE: standard-postgresql
+========================================================
+Successfully generated 100000 raw UUID v7 keys in gen/keys.txt
+
+--- Executing SET benchmark (Seeding 100k keys)... ---
+Requests      [total, rate, throughput]         100001, 2754.07, 2747.51
+Duration      [total, attack, wait]             36.397s, 36.31s, 86.251ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  882ns, 90.831ms, 89.224ms, 93.973ms, 95.787ms, 173.848ms, 727.267ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      0:1  200:100000
+
+--- Executing GET benchmark with Vegeta (600s)... ---
+Requests      [total, rate, throughput]         31991527, 53319.26, 53318.95
+Duration      [total, attack, wait]             10m0s, 10m0s, 3.43ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.814µs, 4.382ms, 4.317ms, 6.226ms, 6.974ms, 8.585ms, 39.832ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:31991527
+
+========================================================
+ENGINE: optimized-postgresql
+========================================================
+Successfully generated 100000 raw UUID v7 keys in gen/keys.txt
+
+--- Executing SET benchmark (Seeding 100k keys)... ---
+Requests      [total, rate, throughput]         100013, 29405.72, 29361.66
+Duration      [total, attack, wait]             3.406s, 3.401s, 4.661ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  340ns, 8.415ms, 6.384ms, 8.152ms, 30.372ms, 32.468ms, 35.232ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           99.99%
+Status Codes  [code:count]                      0:13  200:100000
+
+--- Executing GET benchmark with Vegeta (600s)... ---
+Requests      [total, rate, throughput]         32249699, 53749.43, 53749.21
+Duration      [total, attack, wait]             10m0s, 10m0s, 2.444ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  81.534µs, 4.338ms, 4.226ms, 6.274ms, 7.133ms, 9.237ms, 47.219ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:32249699
+
+========================================================
+ENGINE: postgres-tsid
+========================================================
+Successfully generated 100000 raw TSID 64-bit keys in gen/keys.txt
+
+--- Executing SET benchmark (Seeding 100k keys)... ---
+Requests      [total, rate, throughput]         100003, 2672.79, 2666.21
+Duration      [total, attack, wait]             37.506s, 37.415s, 91.308ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  401ns, 93.6ms, 89.796ms, 95.459ms, 101.944ms, 253.804ms, 938.118ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      0:3  200:100000
+
+--- Executing GET benchmark with Vegeta (600s)... ---
+Requests      [total, rate, throughput]         32395151, 53991.93, 53991.62
+Duration      [total, attack, wait]             10m0s, 10m0s, 3.404ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  105.509µs, 4.321ms, 4.202ms, 6.242ms, 7.096ms, 9.236ms, 33.767ms
+Bytes In      [total, mean]                     0, 0.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:32395151
+```
+
+</details>
 
 ---
 
