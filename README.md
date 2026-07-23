@@ -130,7 +130,6 @@ When operating exclusively as a transient application cache:
 - **Struct Pooling:** Recycles `model.UserData` domain entities via `sync.Pool` during deserialization, eliminating Garbage Collector overhead under heavy GET loads.
 - **Standardized Identifier Libraries:** Leverages `github.com/google/uuid` for monotonic UUID v7 generation, `github.com/oklog/ulid/v2` for 26-character Base32 ULIDs, and 64-bit TSIDs (`bigint`).
 
-
 ---
 
 ## 📋 Methodology & Testing Protocol
@@ -167,6 +166,7 @@ To ensure reproducible and un-biased metrics, tests adhere to a strict isolation
 > [!WARNING]
 > **System Configuration Modification Warning:**
 > Executing `make tune-os` requires elevated privileges (`sudo`) and **permanently modifies system-level kernel parameters** and service cgroups on the host operating system:
+>
 > - **Kernel `sysctl` Network Tuning:** Modifies TCP socket recycling (`net.ipv4.tcp_tw_reuse=1`), expands local ephemeral port ranges (`1024-65535`), increases connection backlogs (`net.core.somaxconn=65535`, `tcp_max_syn_backlog=65535`), and reduces FIN timeout (`tcp_fin_timeout=15`).
 > - **Systemd Service Cgroup Limits:** Sets strict CPU quotas (`CPUQuota=200%`) and memory limits (`MemoryMax=4G`) directly on system services (`postgresql` and `valkey`).
 
@@ -174,7 +174,6 @@ To ensure reproducible and un-biased metrics, tests adhere to a strict isolation
 # Apply Linux kernel socket and systemd cgroup tuning parameters
 make tune-os
 ```
-
 
 ---
 
@@ -410,96 +409,101 @@ Status Codes  [code:count]                      200:32395151
 When choosing between a dedicated in-memory key-value cache (Valkey/Redis) and leveraging PostgreSQL as a high-performance cache store, architects must evaluate six critical considerations:
 
 ### 1. Data Locality & Infrastructure Complexity
-* **Single-Database Architecture (PostgreSQL Only):**
-  * **Pros:** Simplifies system topology, eliminates cache invalidation race conditions, reduces Cloud infrastructure cost (no extra Redis nodes/clusters), unifies backup and point-in-time recovery (PITR).
-  * **Cons:** Shares CPU/RAM resources between relational queries and caching workloads.
-* **Dual-Database Architecture (PostgreSQL + Valkey/Redis):**
-  * **Pros:** Isolate cache workloads to dedicated memory-optimized nodes; sub-millisecond latencies under ultra-high RPS (>75k+ req/s).
-  * **Cons:** Introduces cross-network RPC latency, cache synchronization complexity, dual-write consistency hazards, and additional node management overhead.
+
+- **Single-Database Architecture (PostgreSQL Only):**
+  - **Pros:** Simplifies system topology, eliminates cache invalidation race conditions, reduces Cloud infrastructure cost (no extra Redis nodes/clusters), unifies backup and point-in-time recovery (PITR).
+  - **Cons:** Shares CPU/RAM resources between relational queries and caching workloads.
+- **Dual-Database Architecture (PostgreSQL + Valkey/Redis):**
+  - **Pros:** Isolate cache workloads to dedicated memory-optimized nodes; sub-millisecond latencies under ultra-high RPS (>75k+ req/s).
+  - **Cons:** Introduces cross-network RPC latency, cache synchronization complexity, dual-write consistency hazards, and additional node management overhead.
 
 ### 2. Memory Footprint & Page Eviction Behavior
-* **RAM-Bound Stores (Valkey / Otter):**
-  * Store all keys and values strictly in volatile RAM. When capacity (`maxmemory`) is exceeded, data must be evicted using policies like `allkeys-lru` or writes will fail.
-* **Disk-Backed RAM Cache (PostgreSQL):**
-  * PostgreSQL uses a hybrid memory model: active pages and index nodes sit in `shared_buffers` and Linux OS page cache. If RAM is exceeded, cold pages are transparently paged to disk instead of triggering memory eviction or OOM crashes.
+
+- **RAM-Bound Stores (Valkey / Otter):**
+  - Store all keys and values strictly in volatile RAM. When capacity (`maxmemory`) is exceeded, data must be evicted using policies like `allkeys-lru` or writes will fail.
+- **Disk-Backed RAM Cache (PostgreSQL):**
+  - PostgreSQL uses a hybrid memory model: active pages and index nodes sit in `shared_buffers` and Linux OS page cache. If RAM is exceeded, cold pages are transparently paged to disk instead of triggering memory eviction or OOM crashes.
 
 ### 3. Durability vs. Write Speed Spectrum
-* **ACID Logged Storage (`standard-postgresql` / `postgres-tsid`):**
-  * Guarantees 100% crash safety via Write-Ahead Logging (WAL). Every mutation (`SET`) waits for synchronous disk journal flushes, capping write throughput at **~2,750 req/s**.
-* **Transient `UNLOGGED` Storage (`optimized-postgresql`):**
-  * Bypasses WAL logging entirely, raising write throughput by **10.6x to 29,400 req/s**. If the database node crashes, `UNLOGGED` tables are truncated on restart—a perfect trade-off for cache tables where missing keys can be re-hydrated from source tables.
+
+- **ACID Logged Storage (`standard-postgresql` / `postgres-tsid`):**
+  - Guarantees 100% crash safety via Write-Ahead Logging (WAL). Every mutation (`SET`) waits for synchronous disk journal flushes, capping write throughput at **~2,750 req/s**.
+- **Transient `UNLOGGED` Storage (`optimized-postgresql`):**
+  - Bypasses WAL logging entirely, raising write throughput by **10.6x to 29,400 req/s**. If the database node crashes, `UNLOGGED` tables are truncated on restart—a perfect trade-off for cache tables where missing keys can be re-hydrated from source tables.
 
 ### 4. Primary Key Indexing Efficiency (UUID v7 vs 64-bit TSID vs ULID)
-* **16-Byte Monotonic Identifiers (UUID v7 / ULID):**
-  * Sequential timestamp prefixes ensure B-Tree insertions happen at the rightmost page edge, preventing page splitting and index bloat.
-* **8-Byte Compact Identifiers (TSID `bigint`):**
-  * Halves primary key storage (8 bytes vs 16 bytes). Smaller index nodes allow **2x more key entries per B-Tree page block**, maximizing CPU L1/L2 cache hit ratios and optimizing `shared_buffers` usage across 10,000,000+ rows.
+
+- **16-Byte Monotonic Identifiers (UUID v7 / ULID):**
+  - Sequential timestamp prefixes ensure B-Tree insertions happen at the rightmost page edge, preventing page splitting and index bloat.
+- **8-Byte Compact Identifiers (TSID `bigint`):**
+  - Halves primary key storage (8 bytes vs 16 bytes). Smaller index nodes allow **2x more key entries per B-Tree page block**, maximizing CPU L1/L2 cache hit ratios and optimizing `shared_buffers` usage across 10,000,000+ rows.
 
 ### 5. Serialization Overhead (Protobuf VTProto vs. Relational Mapping)
-* **Protobuf VTProto Binary Payloads:**
-  * Serializes domain objects into zero-allocation byte arrays stored in a PostgreSQL `bytea` column. Eliminates multi-column SQL parsing and runtime Go reflection.
-* **Relational Field Mapping:**
-  * Maps individual struct fields to separate database columns. Provides SQL queryability (`WHERE age > 30`) at the cost of higher query parsing and tuple assembly overhead.
+
+- **Protobuf VTProto Binary Payloads:**
+  - Serializes domain objects into zero-allocation byte arrays stored in a PostgreSQL `bytea` column. Eliminates multi-column SQL parsing and runtime Go reflection.
+- **Relational Field Mapping:**
+  - Maps individual struct fields to separate database columns. Provides SQL queryability (`WHERE age > 30`) at the cost of higher query parsing and tuple assembly overhead.
 
 ---
 
 ## 🎯 Architectural Recommendations & Typology Trade-Off Matrix
-
 
 Based on empirical benchmark data, engineering complexity, energy efficiency, and operational SLAs, we formulate specific recommendations across four distinct caching paradigms (including the choice to eliminate caching altogether):
 
 ### 1. Typology Breakdown & Engineering Guidelines
 
 #### 🟢 Typology A: Process-Local In-Memory Cache (`Otter`)
-* **Core Profile:** Embedded Go memory cache executing in-process without network RPCs.
-* **Performance:** Maximum throughput (**106.6k GET RPS / 94.0k SET RPS**) and lowest latency (**1.48ms p50**).
-* **Energy & Hardware Sobriety:** **Maximum.** Zero network TCP socket allocations, zero protocol serialization, and zero dedicated idle infrastructure.
-* **Limitations:** Bound to single-node application memory; cannot be shared across horizontally scaled microservice replicas without external synchronization.
-* **Recommendation:** Ideal for **L1 micro-caching**, immutable metadata, static application configurations, or single-process hot-path lookups.
+
+- **Core Profile:** Embedded Go memory cache executing in-process without network RPCs.
+- **Performance:** Maximum throughput (**106.6k GET RPS / 94.0k SET RPS**) and lowest latency (**1.48ms p50**).
+- **Energy & Hardware Sobriety:** **Maximum.** Zero network TCP socket allocations, zero protocol serialization, and zero dedicated idle infrastructure.
+- **Limitations:** Bound to single-node application memory; cannot be shared across horizontally scaled microservice replicas without external synchronization.
+- **Recommendation:** Ideal for **L1 micro-caching**, immutable metadata, static application configurations, or single-process hot-path lookups.
 
 #### 🟢 Typology B: Distributed In-Memory Key-Value Store (`Valkey 9.1` / Redis)
-* **Core Profile:** Dedicated standalone/clustered key-value cache running on isolated memory-optimized instances.
-* **Performance:** Excellent throughput (**77.1k GET RPS / 69.0k SET RPS**) and low latency (**2.80ms p50**).
-* **Energy & Hardware Sobriety:** **Medium.** Requires dedicated cloud servers/clusters running continuous event loops, introducing network serialization (RESP protocol) overhead and idle energy footprints.
-* **Limitations:** Introduces operational complexity, cross-network RPC hops, cluster failover management, and risk of cache invalidation bugs (stale cache vs. primary DB).
-* **Recommendation:** Essential for **multi-instance shared session stores**, distributed rate-limiting, real-time pub/sub, or applications requiring sustained >75,000+ GET req/s.
+
+- **Core Profile:** Dedicated standalone/clustered key-value cache running on isolated memory-optimized instances.
+- **Performance:** Excellent throughput (**77.1k GET RPS / 69.0k SET RPS**) and low latency (**2.80ms p50**).
+- **Energy & Hardware Sobriety:** **Medium.** Requires dedicated cloud servers/clusters running continuous event loops, introducing network serialization (RESP protocol) overhead and idle energy footprints.
+- **Limitations:** Introduces operational complexity, cross-network RPC hops, cluster failover management, and risk of cache invalidation bugs (stale cache vs. primary DB).
+- **Recommendation:** Essential for **multi-instance shared session stores**, distributed rate-limiting, real-time pub/sub, or applications requiring sustained >75,000+ GET req/s.
 
 #### 🟢 Typology C: Native PostgreSQL UNLOGGED Cache Table (`optimized-postgresql`)
-* **Core Profile:** Key-Value cache stored inside PostgreSQL using an `UNLOGGED` table (`fillfactor = 70`) and binary Protobuf VTProto payloads.
-* **Performance:** Strong read throughput (**53.7k GET RPS**) and **10.6x faster write throughput** (**29.4k SET RPS**) compared to standard SQL transactions.
-* **Energy & Hardware Sobriety:** **High.** Reuses existing database infrastructure, eliminating the energy footprint and cost of extra Redis/Valkey cluster instances and avoiding additional network hops when co-located.
-* **Limitations:** `UNLOGGED` tables are truncated upon PostgreSQL hard crashes/reboots (ephemeral cache behavior). Missing keys must be re-hydrated from source tables.
-* **Recommendation:** Ideal for teams seeking to **simplify infrastructure to a Single Database Stack** while requiring 10x-faster cache write mutations (29.4k RPS) alongside high read throughput (53.7k RPS).
+
+- **Core Profile:** Key-Value cache stored inside PostgreSQL using an `UNLOGGED` table (`fillfactor = 70`) and binary Protobuf VTProto payloads.
+- **Performance:** Strong read throughput (**53.7k GET RPS**) and **10.6x faster write throughput** (**29.4k SET RPS**) compared to standard SQL transactions.
+- **Energy & Hardware Sobriety:** **High.** Reuses existing database infrastructure, eliminating the energy footprint and cost of extra Redis/Valkey cluster instances and avoiding additional network hops when co-located.
+- **Limitations:** `UNLOGGED` tables are truncated upon PostgreSQL hard crashes/reboots (ephemeral cache behavior). Missing keys must be re-hydrated from source tables.
+- **Recommendation:** Ideal for teams seeking to **simplify infrastructure to a Single Database Stack** while requiring 10x-faster cache write mutations (29.4k RPS) alongside high read throughput (53.7k RPS).
 
 #### 🟢 Typology D: Direct Query on Primary Relational Database / "No Cache Layer" (`standard-postgresql` / `postgres-tsid`)
-* **Core Profile:** Querying the primary relational database tables directly, evaluated against **10,000,000 background rows (~1.3 GB)**.
-* **Performance:** Exceptional read scale (**53.3k - 54.0k GET RPS @ 4.2ms p50 latency**). Write throughput is bound by WAL journal flushes (**~2,700 SET RPS**).
-* **Energy & Hardware Sobriety:** **Maximum.** Eliminates data duplication, eliminates cache invalidation code, and avoids redundant dual-write CPU/network cycles.
-* **Limitations:** Write throughput is capped by WAL disk I/O; heavy analytical writes can contend with read lookups.
-* **Recommendation:** Recommended as the **default baseline architecture** for read-heavy applications (up to 50,000+ req/s) with write rates below ~2,500 req/s. Proves that a properly indexed 10M-row PostgreSQL table is often fast enough, avoiding premature optimization and extra infrastructure.
+
+- **Core Profile:** Querying the primary relational database tables directly, evaluated against **10,000,000 background rows (~1.3 GB)**.
+- **Performance:** Exceptional read scale (**53.3k - 54.0k GET RPS @ 4.2ms p50 latency**). Write throughput is bound by WAL journal flushes (**~2,700 SET RPS**).
+- **Energy & Hardware Sobriety:** **Maximum.** Eliminates data duplication, eliminates cache invalidation code, and avoids redundant dual-write CPU/network cycles.
+- **Limitations:** Write throughput is capped by WAL disk I/O; heavy analytical writes can contend with read lookups.
+- **Recommendation:** Recommended as the **default baseline architecture** for read-heavy applications (up to 50,000+ req/s) with write rates below ~2,500 req/s. Proves that a properly indexed 10M-row PostgreSQL table is often fast enough, avoiding premature optimization and extra infrastructure.
 
 ---
 
 ### 📌 Multi-Dimensional Decision Matrix
 
-| Evaluation Dimension | Typology A: Local In-Memory (`Otter`) | Typology B: Distributed Store (`Valkey 9.1`) | Typology C: Postgres UNLOGGED Cache (`optimized-postgresql`) | Typology D: Direct DB / No Cache (`standard-postgresql` / `postgres-tsid`) |
-| :--- | :---: | :---: | :---: | :---: |
-| **GET Read Throughput (RPS)** | **106,658 req/s** 🚀 | **77,122 req/s** 🟢 | **53,749 req/s** 🟢 | **53,319 - 53,991 req/s** 🟢 |
-| **SET Write Throughput (RPS)** | **94,029 req/s** 🚀 | **68,980 req/s** 🟢 | **29,405 req/s** 🟡 | **2,672 - 2,754 req/s** 🔴 |
-| **p50 Read Latency** | **1.48 ms** | **2.80 ms** | **4.22 ms** | **4.20 - 4.31 ms** |
-| **p99 Read Latency** | **7.69 ms** | **6.78 ms** | **9.24 ms** | **8.59 - 9.24 ms** |
-| **Operational Complexity** | **Low (Infra) / Medium (App)** *(Requires app code to correlate cache state & sync with primary DB)* | **High** *(Cluster deployment, failover, Redis proxy)* | **Low** *(Reuses Postgres pool & schema)* | **Minimum** *(Single DB stack, single source of truth)* |
-| **Energy & Hardware Efficiency** | **Maximum** *(Zero network I/O, zero idle server power)* | **Medium** *(Dedicated idle VMs/clusters, network serialization)* | **High** *(Reuses DB hardware, no extra network hops)* | **Maximum** *(Zero data duplication, zero dual-write CPU usage)* |
-| **Consistency Hazards** | N/A *(Process-local)* | **High** *(Stale cache vs DB, invalidation race conditions)* | **Medium** *(Table-level TTL / background PL/pgSQL purge)* | **Zero Risk** *(100% ACID consistency guaranteed)* |
-| **Durability / Crash Recovery** | Volatile *(Lost on process exit)* | Ephemeral / Configurable *(RDB/AOF)* | Ephemeral *(Truncated on DB hard restart)* | **100% ACID Guaranteed** *(Full WAL journal safety)* |
-| **Memory Overflow Behavior** | App RAM bound | RAM bound *(LRU eviction)* | Hybrid *(RAM `shared_buffers` + transparent disk overflow)* | Hybrid *(RAM `shared_buffers` + transparent disk overflow)* |
-| **Architectural Verdict** | **Best for L1 local cache & static config** | **Best for shared sessions & >75k+ RPS SLAs** | **Best for high-volume cache on single DB stack** | **Best default for <2.5k write RPS (Prevents over-engineering)** |
-
+| Evaluation Dimension             |                                Typology A: Local In-Memory (`Otter`)                                 |           Typology B: Distributed Store (`Valkey 9.1`)            | Typology C: Postgres UNLOGGED Cache (`optimized-postgresql`) | Typology D: Direct DB / No Cache (`standard-postgresql` / `postgres-tsid`) |
+| :------------------------------- | :--------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------: | :----------------------------------------------------------: | :------------------------------------------------------------------------: |
+| **GET Read Throughput (RPS)**    |                                         **106,658 req/s** 🚀                                         |                        **77,122 req/s** 🟢                        |                     **53,749 req/s** 🟢                      |                        **53,319 - 53,991 req/s** 🟢                        |
+| **SET Write Throughput (RPS)**   |                                         **94,029 req/s** 🚀                                          |                        **68,980 req/s** 🟢                        |                     **29,405 req/s** 🟡                      |                         **2,672 - 2,754 req/s** 🔴                         |
+| **p50 Read Latency**             |                                             **1.48 ms**                                              |                            **2.80 ms**                            |                         **4.22 ms**                          |                             **4.20 - 4.31 ms**                             |
+| **p99 Read Latency**             |                                             **7.69 ms**                                              |                            **6.78 ms**                            |                         **9.24 ms**                          |                             **8.59 - 9.24 ms**                             |
+| **Operational Complexity**       | **Low (Infra) / Medium (App)** _(Requires app code to correlate cache state & sync with primary DB)_ |      **High** _(Cluster deployment, failover, Redis proxy)_       |          **Low** _(Reuses Postgres pool & schema)_           |          **Minimum** _(Single DB stack, single source of truth)_           |
+| **Energy & Hardware Efficiency** |                       **Maximum** _(Zero network I/O, zero idle server power)_                       | **Medium** _(Dedicated idle VMs/clusters, network serialization)_ |    **High** _(Reuses DB hardware, no extra network hops)_    |      **Maximum** _(Zero data duplication, zero dual-write CPU usage)_      |
+| **Consistency Hazards**          |                                        N/A _(Process-local)_                                         |   **High** _(Stale cache vs DB, invalidation race conditions)_    |  **Medium** _(Table-level TTL / background PL/pgSQL purge)_  |             **Zero Risk** _(100% ACID consistency guaranteed)_             |
+| **Durability / Crash Recovery**  |                                  Volatile _(Lost on process exit)_                                   |               Ephemeral / Configurable _(RDB/AOF)_                |          Ephemeral _(Truncated on DB hard restart)_          |            **100% ACID Guaranteed** _(Full WAL journal safety)_            |
+| **Memory Overflow Behavior**     |                                            App RAM bound                                             |                    RAM bound _(LRU eviction)_                     | Hybrid _(RAM `shared_buffers` + transparent disk overflow)_  |        Hybrid _(RAM `shared_buffers` + transparent disk overflow)_         |
+| **Architectural Verdict**        |                             **Best for L1 local cache & static config**                              |           **Best for shared sessions & >75k+ RPS SLAs**           |      **Best for high-volume cache on single DB stack**       |      **Best default for <2.5k write RPS (Prevents over-engineering)**      |
 
 ---
 
 ## 📄 License
 
 This repository is distributed under the MIT License. See `LICENSE` for details.
-
-
