@@ -162,13 +162,19 @@ To ensure reproducible and un-biased metrics, tests adhere to a strict isolation
 - **Vegeta** (`go install github.com/tsenart/vegeta/v12@latest`)
 - **protoc** & `protoc-gen-go-vtproto` (optional, for regenerating protobuf code)
 
-### Kernel Tuning
+### Kernel & OS Tuning (`make tune-os`)
 
-Apply Linux TCP socket parameter adjustments prior to running benchmarks:
+> [!WARNING]
+> **System Configuration Modification Warning:**
+> Executing `make tune-os` requires elevated privileges (`sudo`) and **permanently modifies system-level kernel parameters** and service cgroups on the host operating system:
+> - **Kernel `sysctl` Network Tuning:** Modifies TCP socket recycling (`net.ipv4.tcp_tw_reuse=1`), expands local ephemeral port ranges (`1024-65535`), increases connection backlogs (`net.core.somaxconn=65535`, `tcp_max_syn_backlog=65535`), and reduces FIN timeout (`tcp_fin_timeout=15`).
+> - **Systemd Service Cgroup Limits:** Sets strict CPU quotas (`CPUQuota=200%`) and memory limits (`MemoryMax=4G`) directly on system services (`postgresql` and `valkey`).
 
 ```bash
+# Apply Linux kernel socket and systemd cgroup tuning parameters
 make tune-os
 ```
+
 
 ---
 
