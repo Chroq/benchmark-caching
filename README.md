@@ -489,7 +489,8 @@ Based on empirical benchmark data, engineering complexity, energy efficiency, an
 | **p50 Read Latency** | **1.48 ms** | **2.80 ms** | **4.22 ms** | **4.20 - 4.31 ms** |
 | **p99 Read Latency** | **7.69 ms** | **6.78 ms** | **9.24 ms** | **8.59 - 9.24 ms** |
 
-| **Operational Complexity** | **Zero** *(In-process)* | **High** *(Cluster deployment, failover, Redis proxy)* | **Low** *(Reuses Postgres pool & schema)* | **Minimum** *(Single DB stack, single source of truth)* |
+| **Operational Complexity** | **Low (Infra) / Medium (App)** *(Requires app code to correlate cache state & sync with primary DB)* | **High** *(Cluster deployment, failover, Redis proxy)* | **Low** *(Reuses Postgres pool & schema)* | **Minimum** *(Single DB stack, single source of truth)* |
+
 | **Energy & Hardware Efficiency** | **Maximum** *(Zero network I/O, zero idle server power)* | **Medium** *(Dedicated idle VMs/clusters, network serialization)* | **High** *(Reuses DB hardware, no extra network hops)* | **Maximum** *(Zero data duplication, zero dual-write CPU usage)* |
 | **Consistency Hazards** | N/A *(Process-local)* | **High** *(Stale cache vs DB, invalidation race conditions)* | **Medium** *(Table-level TTL / background PL/pgSQL purge)* | **Zero Risk** *(100% ACID consistency guaranteed)* |
 | **Durability / Crash Recovery** | Volatile *(Lost on process exit)* | Ephemeral / Configurable *(RDB/AOF)* | Ephemeral *(Truncated on DB hard restart)* | **100% ACID Guaranteed** *(Full WAL journal safety)* |
