@@ -115,7 +115,6 @@ tune-os:
 	@sudo -n systemctl set-property postgresql MemoryMax=4G 2>/dev/null || true
 	@sudo -n systemctl set-property valkey CPUQuota=200% 2>/dev/null || true
 	@sudo -n systemctl set-property valkey MemoryMax=4G 2>/dev/null || true
-	@sudo -n echo never > /sys/kernel/mm/transparent_hugepage/enabled
 	@echo "OS network tuning complete."
 
 # Master orchestrator running benchmarks sequentially
