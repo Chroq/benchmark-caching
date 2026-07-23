@@ -31,15 +31,6 @@ The benchmark runner executes an ultra-low-allocation HTTP service written in Go
                       |    (Zero-Alloc Buffer Recycling) |
                       +----------------------------------+
                                        |
-<<<<<<< HEAD
-     +-------------------+-------------+-------------+-------------------+
-     |                   |                           |                   |
-     v                   v                           v                   v
-+----------+   +-------------------+   +--------------------+   +--------------------+
-|  Otter   |   |   Valkey 9.1      |   | Standard Postgres  |   | Optimized Postgres |
-| (Memory) |   | (Protobuf VTProto)|   | (Relational / UUID)|   | (UNLOGGED / VTProto|
-+----------+   +-------------------+   +--------------------+   +--------------------+
-=======
      +------------+----------+---------+---------+-------------------+
      |            |          |                   |                   |
      v            v          v                   v                   v
@@ -47,7 +38,6 @@ The benchmark runner executes an ultra-low-allocation HTTP service written in Go
 |  Otter   | | Valkey  | | Standard Postgres  | | Optimized Postgres | |   Postgres TSID    |
 | (Memory) | |  (9.1)  | |(Relational/UUIDv7) | |(UNLOGGED/VTProto)  | | (64-bit TSID Key)  |
 +----------+ +---------+ +--------------------+ +--------------------+ +--------------------+
->>>>>>> 14d5f03 (docs: update README with 10M rows benchmark results, engine tuning criteria, and postgres-tsid)
 ```
 
 ### Evaluated Configurations
@@ -85,18 +75,9 @@ Instead of Go's reflection-heavy standard `proto.Marshal` or `json.Marshal`, all
 - **Zero Heap Allocations:** Encodes (`MarshalVT`) and decodes (`UnmarshalVT`) binary payloads without runtime reflection or dynamic struct allocations.
 - **Wire Format Compatibility:** Fully compatible with standard Protobuf v3 specifications.
 
----
-
 ### 2. PostgreSQL Engine Tuning Strategies (`postgresql.conf`)
 
-<<<<<<< HEAD
-- **`UNLOGGED` Tables:** Disables Write-Ahead Logging (WAL). Eliminates disk I/O bottlenecks during cache mutations (`SET`), enabling near-in-memory write speeds.
-- **HOT (Heap-Only Tuple) Optimization (`fillfactor = 70`):** Reserves 30% page space on table blocks to allow in-place tuple updates. Reduces B-Tree index maintenance and prevents index bloat during frequent row overwrites.
-- **Non-Blocking Asynchronous Purge (`FOR UPDATE SKIP LOCKED`):** Expired cache items are purged in background batches via PL/pgSQL (`purge_expired_cache_keys()`) using non-blocking row locks. Ensures active `GET` requests never block on garbage collection.
-- **16-Byte Compact Binary Keys:** Keys are stored as native 16-byte binary UUIDs/ULIDs, maintaining a minimal B-Tree index footprint that fits completely inside PostgreSQL `shared_buffers`.
-=======
-PostgreSQL is engineered by default for strict ACID data durability. To maximize throughput and minimize latency for caching workloads, RAM allocations and Write-Ahead Log (WAL) behaviors must be tuned (`postgresql.conf` or `ALTER SYSTEM SET ...`):
->>>>>>> 14d5f03 (docs: update README with 10M rows benchmark results, engine tuning criteria, and postgres-tsid)
+PostgreSQL is engineered by default for strict ACID data durability. To maximize throughput and minimize latency for caching workloads, RAM allocations, Write-Ahead Logging (WAL), and page management must be tuned (`postgresql.conf` or `ALTER SYSTEM SET ...`):
 
 #### A. Memory Allocation (RAM Optimization)
 
@@ -113,10 +94,10 @@ PostgreSQL is engineered by default for strict ACID data durability. To maximize
 
 #### C. Transient Cache Architecture (`UNLOGGED` & HOT Updates)
 
-- **`UNLOGGED` Tables:** Disables Write-Ahead Logging (WAL) for transient cache items, achieving near-in-memory write speeds.
+- **`UNLOGGED` Tables:** Disables Write-Ahead Logging (WAL) for transient cache items, achieving near-in-memory write speeds by eliminating disk I/O synchronization.
 - **HOT (Heap-Only Tuple) Optimization (`fillfactor = 70`):** Reserves 30% page space on table blocks to allow in-place tuple updates, eliminating B-Tree index rewrite overhead during frequent key overwrites.
 - **Non-Blocking Asynchronous Purge (`FOR UPDATE SKIP LOCKED`):** Expired cache items are purged in background batches via PL/pgSQL using non-blocking row locks, preventing `GET` requests from blocking during garbage collection.
-- **Compact Keys:** 16-byte binary UUID v7 and 8-byte TSID keys keep index sizes small enough to fit within `shared_buffers`.
+- **Compact Keys:** 16-byte binary UUID v7 / ULID and 8-byte TSID keys keep index node sizes minimal, ensuring B-Tree structures fit inside `shared_buffers`.
 
 ---
 
@@ -145,13 +126,10 @@ When operating exclusively as a transient application cache:
 
 ### 4. Application Layer & Runtime Optimization
 
-- **`fasthttp` Core:** Replaces standard `net/http` with high-performance byte-slice parsing.
+- **`fasthttp` Core:** Replaces standard `net/http` with high-performance byte-slice parsing and connection buffer recycling.
 - **Struct Pooling:** Recycles `model.UserData` domain entities via `sync.Pool` during deserialization, eliminating Garbage Collector overhead under heavy GET loads.
-<<<<<<< HEAD
-- **Standardized Identifier Libraries:** Leverages `github.com/oklog/ulid/v2` for monotonic ULID generation and `github.com/google/uuid` for standard UUID operations.
-=======
-- **Standardized Identifier Libraries:** Leverages `github.com/google/uuid` for monotonic UUID v7 (RFC 9562) generation and TSID 64-bit identifiers.
->>>>>>> 14d5f03 (docs: update README with 10M rows benchmark results, engine tuning criteria, and postgres-tsid)
+- **Standardized Identifier Libraries:** Leverages `github.com/google/uuid` for monotonic UUID v7 generation, `github.com/oklog/ulid/v2` for 26-character Base32 ULIDs, and 64-bit TSIDs (`bigint`).
+
 
 ---
 
@@ -421,6 +399,59 @@ Status Codes  [code:count]                      200:32395151
 
 ---
 
+## ⚖️ Comprehensive Benchmark Considerations & Architectural Trade-Offs
+
+When choosing between a dedicated in-memory key-value cache (Valkey/Redis) and leveraging PostgreSQL as a high-performance cache store, architects must evaluate six critical considerations:
+
+### 1. Data Locality & Infrastructure Complexity
+* **Single-Database Architecture (PostgreSQL Only):**
+  * **Pros:** Simplifies system topology, eliminates cache invalidation race conditions, reduces Cloud infrastructure cost (no extra Redis nodes/clusters), unifies backup and point-in-time recovery (PITR).
+  * **Cons:** Shares CPU/RAM resources between relational queries and caching workloads.
+* **Dual-Database Architecture (PostgreSQL + Valkey/Redis):**
+  * **Pros:** Isolate cache workloads to dedicated memory-optimized nodes; sub-millisecond latencies under ultra-high RPS (>75k+ req/s).
+  * **Cons:** Introduces cross-network RPC latency, cache synchronization complexity, dual-write consistency hazards, and additional node management overhead.
+
+### 2. Memory Footprint & Page Eviction Behavior
+* **RAM-Bound Stores (Valkey / Otter):**
+  * Store all keys and values strictly in volatile RAM. When capacity (`maxmemory`) is exceeded, data must be evicted using policies like `allkeys-lru` or writes will fail.
+* **Disk-Backed RAM Cache (PostgreSQL):**
+  * PostgreSQL uses a hybrid memory model: active pages and index nodes sit in `shared_buffers` and Linux OS page cache. If RAM is exceeded, cold pages are transparently paged to disk instead of triggering memory eviction or OOM crashes.
+
+### 3. Durability vs. Write Speed Spectrum
+* **ACID Logged Storage (`standard-postgresql` / `postgres-tsid`):**
+  * Guarantees 100% crash safety via Write-Ahead Logging (WAL). Every mutation (`SET`) waits for synchronous disk journal flushes, capping write throughput at **~2,750 req/s**.
+* **Transient `UNLOGGED` Storage (`optimized-postgresql`):**
+  * Bypasses WAL logging entirely, raising write throughput by **10.6x to 29,400 req/s**. If the database node crashes, `UNLOGGED` tables are truncated on restart—a perfect trade-off for cache tables where missing keys can be re-hydrated from source tables.
+
+### 4. Primary Key Indexing Efficiency (UUID v7 vs 64-bit TSID vs ULID)
+* **16-Byte Monotonic Identifiers (UUID v7 / ULID):**
+  * Sequential timestamp prefixes ensure B-Tree insertions happen at the rightmost page edge, preventing page splitting and index bloat.
+* **8-Byte Compact Identifiers (TSID `bigint`):**
+  * Halves primary key storage (8 bytes vs 16 bytes). Smaller index nodes allow **2x more key entries per B-Tree page block**, maximizing CPU L1/L2 cache hit ratios and optimizing `shared_buffers` usage across 10,000,000+ rows.
+
+### 5. Serialization Overhead (Protobuf VTProto vs. Relational Mapping)
+* **Protobuf VTProto Binary Payloads:**
+  * Serializes domain objects into zero-allocation byte arrays stored in a PostgreSQL `bytea` column. Eliminates multi-column SQL parsing and runtime Go reflection.
+* **Relational Field Mapping:**
+  * Maps individual struct fields to separate database columns. Provides SQL queryability (`WHERE age > 30`) at the cost of higher query parsing and tuple assembly overhead.
+
+---
+
+### 📌 Decision & Architecture Trade-Off Matrix
+
+| Consideration / Metric | In-Memory (Otter) | Valkey 9.1 (Redis) | Optimized Postgres (`UNLOGGED`) | Standard Postgres (Relational 10M rows) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Max Read Throughput (GET)** | **106.6k req/s** | **77.1k req/s** | **53.7k req/s** | **53.3k req/s** |
+| **Max Write Throughput (SET)** | **94.0k req/s** | **68.9k req/s** | **29.4k req/s** | **2.7k req/s** |
+| **p50 Read Latency** | **1.48ms** | **2.80ms** | **4.22ms** | **4.31ms** |
+| **Dataset Scale Limit** | System RAM | Server RAM | RAM + Disk Overflow | RAM + Disk Overflow |
+| **Data Durability** | Volatile | Configurable (AOF/RDB) | Ephemeral (Truncated on crash) | 100% ACID Guaranteed |
+| **Operational Overhead** | Zero (In-process) | Medium (Separate Cluster) | Low (Existing Postgres Instance) | Low (Existing Postgres Instance) |
+| **Ideal Use Case** | Process-local micro-cache | Dedicated shared cache cluster | High-volume transient application cache | Primary relational system of record |
+
+---
+
 ## 📄 License
 
 This repository is distributed under the MIT License. See `LICENSE` for details.
+
